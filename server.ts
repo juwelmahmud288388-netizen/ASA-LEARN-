@@ -1803,7 +1803,8 @@ async function startServer() {
 
       const {
         message,
-        language = 'en',
+        mode = 'bangla_tutor',
+        language = 'bn',
         classContext = '',
         subjectContext = '',
         lessonContext = '',
@@ -1812,7 +1813,7 @@ async function startServer() {
 
       const cleanMessage = String(message || '').trim();
       if (!cleanMessage) {
-        res.status(400).json({ error: 'Please enter a question for the AI Tutor.' });
+        res.status(400).json({ error: 'অনুগ্রহ করে এআই টিউটরের জন্য একটি প্রশ্ন লিখুন।' });
         return;
       }
 
@@ -1891,13 +1892,20 @@ async function startServer() {
               .join('\n')}`
           : '';
 
+      const modeHint =
+        mode === 'chapter_summary'
+          ? 'The student requested a quick summary/breakdown of this topic or video lesson. Present a crystal-clear, bullet-point summary so they grasp the entire concept at a glance.'
+          : '';
+
       const systemInstruction = [
         aiSettings.systemInstructions,
+        'Always respond in fluent, polite, encouraging Bengali (বাংলা) using clean Markdown (**bold** highlights and `-` bullet points), formatted cleanly for a compact chat widget.',
+        'Act like a patient, caring teacher: break complex concepts into small steps with real-world examples and explain the core logic clearly rather than only giving final answers.',
         classContext ? `Student Class: ${classContext}.` : '',
         subjectContext ? `Subject Focus: ${subjectContext}.` : '',
-        lessonContext ? `Current Lesson: ${lessonContext}.` : '',
-        `Preferred Language: ${language === 'bn' ? 'Natural Unicode Bangla (বাংলা) unless the student writes strictly in English.' : 'Clear English (or Bangla if the student asks in Bangla).'}` ,
-        'Keep your answer direct, well-structured, easy to read on a phone, and concise.',
+        lessonContext ? `Current Lesson / Video Context: ${lessonContext}.` : '',
+        `Interface Language Setting: ${language === 'bn' ? 'Bengali' : 'English (still communicate primarily in fluent, polite Bengali as requested by Asha Learning AI Tutor guidelines unless the student explicitly requests English-only)'}.`,
+        modeHint,
         availableNotesContext,
       ]
         .filter(Boolean)

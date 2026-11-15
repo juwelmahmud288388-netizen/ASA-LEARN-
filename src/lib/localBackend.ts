@@ -1161,11 +1161,16 @@ export function localAiTutorReply(payload: {
       fileType: r.fileType,
     }));
 
-  const isBn = payload.language === 'bn';
-  const contextLine = payload.lessonContext ? `\n• পাঠ (Lesson): ${payload.lessonContext}` : '';
-  const reply = isBn
-    ? `আপনার প্রশ্নের জন্য ধন্যবাদ! (${payload.classContext} · ${payload.subjectContext})${contextLine}\n\nপ্রশ্ন: "${payload.message}"\n\nধাপে ধাপে সমাধান ও ধারণা:\n১. প্রথমে অধ্যায়ের মূল সংজ্ঞা ও প্রদত্ত তথ্যগুলো (Given data) আলাদা করে লিখে নিন।\n২. সংশ্লিষ্ট NCTB মূল সূত্রটি প্রয়োগ করে ধাপে ধাপে হিসাব করুন এবং সঠিক একক ব্যবহার করুন।\n৩. আরও অনুশীলনের জন্য নিচের লেসন নোট ও MCQ/CQ অনুশীলনী দেখুন অথবা সুনির্দিষ্ট অংক/সমীকরণ লিখুন যেন আমি পুরোটি কষে দিতে পারি।`
-    : `Great question for ${payload.classContext} · ${payload.subjectContext}!${contextLine}\n\nRegarding: "${payload.message}"\n\nStep-by-step approach:\n1. Identify the core principle, definitions, and given values from your NCTB textbook.\n2. Apply the matching formula step-by-step and double-check units or signs.\n3. Use the linked study notes & Lesson Practice MCQs/CQs to test your mastery—share any exact equation or paragraph if you want a full worked walkthrough!`;
+  const contextLine = payload.lessonContext ? `\n- **বর্তমান পাঠ:** ${payload.lessonContext}` : '';
+  const reply = `**আশা লার্নিং এআই টিউটর** (${payload.classContext} · ${payload.subjectContext})${contextLine}
+
+চমৎকার প্রশ্ন করেছো! বিষয়টি যেন সহজে মাথায় গেঁথে যায়, সেজন্য ধাপে ধাপে বুঝিয়ে দিচ্ছি:
+
+- **মূল ধারণা:** প্রথমে পাঠ্যবইয়ের সংজ্ঞা ও **প্রদত্ত তথ্য (Given Data)** আলাদা করে খাতায় লিখে নাও।
+- **বাস্তব উদাহরণ ও যুক্তি:** মুখস্থ না করে সূত্র বা নিয়মটি *কেন* কাজ করে তা বাস্তব উদাহরণের সাথে মিলিয়ে বুঝে নাও।
+- **ধাপে ধাপে সমাধান:** সংশ্লিষ্ট **NCTB মূল সূত্র** প্রয়োগ করে প্রতিটি ধাপ পরিষ্কারভাবে ও সঠিক এককসহ হিসাব করো।
+
+তোমার প্রশ্নটি (**"${payload.message}"**) নিয়ে নির্দিষ্ট কোনো অংক, লাইন বা অধ্যায় দিলে আমি আরও বিস্তারিতভাবে ধাপে ধাপে বুঝিয়ে দেবো! চালিয়ে যাও, তুমি দারুণ করছো।`;
 
   return { reply, matchedResources };
 }

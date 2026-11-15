@@ -22,6 +22,109 @@ import { createClientId } from '../lib/utils';
 import { useApp } from '../context/AppContext';
 import type { AiChatMessage, MatchedStudyResource } from '../types';
 
+function renderInlineMarkdown(text: string): React.ReactNode[] {
+  const tokens = text.split(/(\*\*[^*]+\*\*|`[^`]+`|\*[^*\n]+\*)/g);
+  return tokens.map((part, idx) => {
+    if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+      return (
+        <strong key={idx} className="font-bold">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
+      return (
+        <code
+          key={idx}
+          className="rounded bg-[#172554]/10 px-1.5 py-0.5 font-mono text-[12px] font-semibold text-[#172554] dark:bg-white/15 dark:text-[#BFE8FF]"
+        >
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
+      return (
+        <em key={idx} className="italic">
+          {part.slice(1, -1)}
+        </em>
+      );
+    }
+    return <React.Fragment key={idx}>{part}</React.Fragment>;
+  });
+}
+
+function FormattedChatText({ text, isUser }: { text: string; isUser: boolean }) {
+  if (isUser) {
+    return <span className="whitespace-pre-wrap">{text}</span>;
+  }
+
+  const lines = text.split(/\r?\n/);
+  const blocks: React.ReactNode[] = [];
+  let listItems: Array<{ ordered: boolean; num?: string; content: string }> = [];
+
+  const flushList = (keyPrefix: string) => {
+    if (listItems.length === 0) return;
+    const isOrdered = listItems[0].ordered;
+    const Tag = isOrdered ? 'ol' : 'ul';
+    blocks.push(
+      <Tag
+        key={`${keyPrefix}-list`}
+        className={`my-1.5 space-y-1.5 pl-4 ${isOrdered ? 'list-decimal' : 'list-disc'} marker:text-[#263B91] dark:marker:text-[#BFE8FF]`}
+      >
+        {listItems.map((item, idx) => (
+          <li key={idx} className="leading-relaxed">
+            {renderInlineMarkdown(item.content)}
+          </li>
+        ))}
+      </Tag>
+    );
+    listItems = [];
+  };
+
+  lines.forEach((rawLine, idx) => {
+    const line = rawLine.trim();
+    if (!line) {
+      flushList(`b-${idx}`);
+      return;
+    }
+
+    const bulletMatch = line.match(/^[-*•]\s+(.+)$/);
+    if (bulletMatch) {
+      if (listItems.length > 0 && listItems[0].ordered) flushList(`o-${idx}`);
+      listItems.push({ ordered: false, content: bulletMatch[1] });
+      return;
+    }
+
+    const orderedMatch = line.match(/^([0-9০-৯]+)[.)]\s+(.+)$/);
+    if (orderedMatch) {
+      if (listItems.length > 0 && !listItems[0].ordered) flushList(`u-${idx}`);
+      listItems.push({ ordered: true, num: orderedMatch[1], content: orderedMatch[2] });
+      return;
+    }
+
+    flushList(`p-${idx}`);
+
+    const headingMatch = line.match(/^#{1,3}\s+(.+)$/);
+    if (headingMatch) {
+      blocks.push(
+        <p key={`h-${idx}`} className="mt-2 mb-1 font-display text-sm font-bold text-[#172554] dark:text-[#BFE8FF]">
+          {renderInlineMarkdown(headingMatch[1])}
+        </p>
+      );
+      return;
+    }
+
+    blocks.push(
+      <p key={`p-${idx}`} className="leading-relaxed [&:not(:last-child)]:mb-1.5">
+        {renderInlineMarkdown(line)}
+      </p>
+    );
+  });
+
+  flushList('end');
+  return <div className="space-y-0.5 text-sm">{blocks}</div>;
+}
+
 export const AiTutorWidget: React.FC = () => {
   const {
     language,
@@ -128,18 +231,18 @@ export const AiTutorWidget: React.FC = () => {
   const classObj = classes.find((c) => c.classId === selectedClass);
   const classLabel = classObj ? (language === 'bn' ? classObj.titleBn : classObj.title) : selectedClass;
 
-  const suggestedQuestions =
-    language === 'bn'
-      ? [
-          'ধাপে ধাপে সমাধান করো: x² - 5x + 6 = 0',
-          'ত্রিকোণমিতির মূল সূত্র ও পিডিএফ নোট দাও',
-          'নিউটনের গতির দ্বিতীয় সূত্র F = ma সহজভাবে বুঝিয়ে দাও',
-        ]
-      : [
-          'Solve step-by-step: x² - 5x + 6 = 0',
-          'Explain trigonometry ratios and share related notes',
-          'Explain Newton’s second law F = ma with an everyday example',
-        ];
+  const suggestedQuestions = useMemo(() => {
+    const lessonTitle = aiContextLesson ? aiContextLesson.titleBn || aiContextLesson.title : '';
+    const summaryPrompt = lessonTitle
+      ? `"${lessonTitle}" পাঠটির মূল বিষয়গুলো সহজ বুলেট পয়েন্টে সারসংক্ষেপ দাও`
+      : 'অধ্যায়ের মূল ধারণাগুলো সহজ বুলেট পয়েন্টে সারসংক্ষেপ করে দাও';
+    return [
+      summaryPrompt,
+      'ধাপে ধাপে সমাধান করো ও মূল যুক্তি বুঝিয়ে দাও: x² - 5x + 6 = 0',
+      'নিউটনের গতির দ্বিতীয় সূত্র F = ma বাস্তব উদাহরণসহ সহজভাবে বুঝিয়ে দাও',
+      'ত্রিকোণমিতির মূল সূত্রগুলো সংক্ষেপে তালিকা করে দাও',
+    ];
+  }, [aiContextLesson]);
 
   const speakText = async (text: string, msgId = 'auto') => {
     if (!speakingEnabled) return;
@@ -368,11 +471,11 @@ export const AiTutorWidget: React.FC = () => {
         <button
           type="button"
           onClick={() => setAiDrawerOpen(true)}
-          aria-label="Open ASA,LEARN AI Tutor"
+          aria-label="Open Asha Learning AI Tutor"
           className="fixed bottom-20 right-4 md:bottom-5 md:right-5 z-40 hidden md:flex items-center gap-2 rounded-2xl bg-[#172554] px-4 py-3 text-sm font-semibold text-white shadow-[0_12px_32px_rgba(23,37,84,0.32)] transition hover:-translate-y-0.5 hover:bg-[#263B91] focus-visible:outline-2 focus-visible:outline-[#BFE8FF] dark:bg-[#BFE8FF] dark:text-[#172554]"
         >
           <Bot className="h-5 w-5" />
-          <span>{language === 'bn' ? 'এআই টিউটর' : 'AI Tutor'}</span>
+          <span>{language === 'bn' ? 'আশা এআই টিউটর' : 'Asha AI Tutor'}</span>
         </button>
       )}
 
@@ -388,7 +491,7 @@ export const AiTutorWidget: React.FC = () => {
                 </div>
                 <div>
                   <h2 className="font-display text-base font-bold text-[#172033] dark:text-white">
-                    {language === 'bn' ? 'ASA,LEARN এআই টিউটর' : 'ASA,LEARN AI Tutor'}
+                    {language === 'bn' ? 'আশা লার্নিং এআই টিউটর' : 'Asha Learning AI Tutor'}
                   </h2>
                   <p className="text-xs text-[#64748B] dark:text-slate-400">
                     {classLabel} · {selectedSubject}
@@ -471,20 +574,16 @@ export const AiTutorWidget: React.FC = () => {
                 <div className="space-y-4 py-3">
                   <div className="glass-surface rounded-2xl p-4 text-sm text-[#172033] dark:text-slate-200">
                     <p className="font-semibold">
-                      {language === 'bn'
-                        ? 'হ্যালো! আমি আপনার ASA,LEARN এআই টিউটর।'
-                        : 'Hello! I am your ASA,LEARN AI Tutor.'}
+                      আসসালামু আলাইকুম / হ্যালো! আমি তোমার <strong>আশা লার্নিং এআই টিউটর</strong>।
                     </p>
                     <p className="mt-1 text-xs leading-relaxed text-[#64748B] dark:text-slate-400">
-                      {language === 'bn'
-                        ? 'বাংলা বা ইংরেজিতে যেকোনো প্রশ্ন লিখুন — সাথে সাথে উত্তর ও সংশ্লিষ্ট স্টাডি নোট/PDF লিংক পেয়ে যাবেন।'
-                        : 'Ask any NCTB question in Bangla or English and receive instant step-by-step explanations plus matching study note links.'}
+                      গণিত, বিজ্ঞান, ইতিহাস, ভাষা বা যেকোনো বিষয়ের প্রশ্ন করো — আমি ধাপে ধাপে সহজ উদাহরণসহ বুঝিয়ে দেবো এবং প্রয়োজনীয় স্টাডি নোট/PDF লিংকও দেবো।
                     </p>
                   </div>
 
                   <div className="space-y-2">
                     <p className="text-xs font-semibold text-[#64748B] dark:text-slate-400">
-                      {language === 'bn' ? 'দ্রুত প্রশ্ন' : 'Quick Questions'}
+                      দ্রুত শুরু করো (Quick Prompts)
                     </p>
                     {suggestedQuestions.map((q) => (
                       <button
@@ -506,13 +605,13 @@ export const AiTutorWidget: React.FC = () => {
                   className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
                 >
                   <div
-                    className={`max-w-[88%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
+                    className={`max-w-[90%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                       msg.role === 'user'
                         ? 'bg-[#172554] text-white dark:bg-[#263B91]'
                         : 'glass-surface text-[#172033] dark:text-slate-100'
                     }`}
                   >
-                    {msg.text}
+                    <FormattedChatText text={msg.text} isUser={msg.role === 'user'} />
                   </div>
 
                   {/* Direct Study Note / PDF Links Matched for this Question */}
