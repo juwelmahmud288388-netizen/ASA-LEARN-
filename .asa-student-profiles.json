@@ -1,0 +1,27 @@
+{
+  "stu_1b5de8dd036c5bd1": {
+    "uid": "stu_1b5de8dd036c5bd1",
+    "studentId": "ASA-1230",
+    "fullName": "Verification Scholar",
+    "classId": "class-9",
+    "preferredLanguage": "bn",
+    "preferredTheme": "light",
+    "role": "student",
+    "accountStatus": "active",
+    "dailyGoalMinutes": 45,
+    "streakDays": 1,
+    "xp": 50,
+    "lastActiveDate": "2026-11-15",
+    "streakHistory": [
+      "2026-11-15"
+    ],
+    "passcodeKey": "3072a7373283cd0aa03cb8edb99181ac764c6a78906a44b0ce13f0dd541a4ab4",
+    "passwordHash": "$2b$10$lblWscda5N9PuwNewgiPn.rvUGhjt9Qh5tag1E1hFT02KfIIgZKKS",
+    "createdAt": "2026-11-15T11:36:54.349Z",
+    "updatedAt": "2026-11-15T11:36:54.349Z",
+    "progressList": [],
+    "bookmarks": [],
+    "notes": [],
+    "quizAttempts": []
+  }
+}

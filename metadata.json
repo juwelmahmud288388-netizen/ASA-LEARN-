@@ -1,0 +1,6 @@
+{
+  "name": "ASA,LEARN",
+  "description": "Premium Liquid Glass educational resource hub and AI-powered e-learning platform for Class 6 to Class 10 students.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

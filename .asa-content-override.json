@@ -1,0 +1,51 @@
+{
+  "upserts": {
+    "resources": {}
+  },
+  "deletes": {
+    "resources": [
+      "res_e2e_1794743465400"
+    ]
+  },
+  "activityLogs": [
+    {
+      "logId": "log_1794743465492",
+      "actorId": "asa_owner_admin",
+      "actorName": "Primary Owner",
+      "action": "DELETED_RESOURCES",
+      "target": "res_e2e_1794743465400",
+      "timestamp": "2026-11-15T11:51:05.492Z"
+    },
+    {
+      "logId": "log_1794743465404",
+      "actorId": "asa_owner_admin",
+      "actorName": "Primary Owner",
+      "action": "SAVED_RESOURCES",
+      "target": "Test Sheet",
+      "timestamp": "2026-11-15T11:51:05.404Z"
+    },
+    {
+      "logId": "log_1794743464714",
+      "actorId": "stu_b92b9c72f261fa8f",
+      "actorName": "E2E Test Scholar",
+      "action": "SUBMITTED_FEEDBACK",
+      "target": "5/5 stars",
+      "timestamp": "2026-11-15T11:51:04.713Z"
+    }
+  ],
+  "profileLikes": {
+    "stu_b92b9c72f261fa8f": [
+      "stu_b92b9c72f261fa8f"
+    ]
+  },
+  "feedbacks": [
+    {
+      "feedbackId": "fb_e2e_1794743464710",
+      "studentId": "stu_b92b9c72f261fa8f",
+      "studentName": "E2E Test Scholar",
+      "rating": 5,
+      "message": "E2E smooth check",
+      "createdAt": "2026-11-15T11:51:04.713Z"
+    }
+  ]
+}
