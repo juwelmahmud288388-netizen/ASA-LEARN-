@@ -80,8 +80,8 @@ const AppShell: React.FC = () => {
   const [failsafeDone, setFailsafeDone] = useState(false);
 
   useEffect(() => {
-    const t1 = window.setTimeout(() => setMinDelayDone(true), 1050);
-    const t2 = window.setTimeout(() => setFailsafeDone(true), 1900);
+    const t1 = window.setTimeout(() => setMinDelayDone(true), 2750);
+    const t2 = window.setTimeout(() => setFailsafeDone(true), 4100);
     return () => {
       window.clearTimeout(t1);
       window.clearTimeout(t2);
