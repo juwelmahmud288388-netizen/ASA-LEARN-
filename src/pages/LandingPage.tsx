@@ -20,19 +20,19 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import { useApp } from '../context/AppContext';
+import { type AcademicGroup, useApp } from '../context/AppContext';
 import { t } from '../i18n/translations';
 import { getClassMeta, getSubjectVisual, GROUP_OPTIONS } from '../lib/subjectIcons';
 import { extractYouTubeId, getYouTubeEmbedUrl, getYouTubeThumbnail, HERO_WORKSPACE_IMAGE } from '../lib/utils';
 import type { Announcement, SubjectGroup } from '../types';
 
-const ONBOARDING_STORAGE_KEY = 'asa_onboarding_done';
-
 export const LandingPage: React.FC = () => {
   const {
     language,
-    showLanguageModal,
     userProfile,
+    preferredGroup,
+    onboardingPrefs,
+    openOnboardingModal,
     appSettings,
     categories,
     classes,
@@ -53,27 +53,10 @@ export const LandingPage: React.FC = () => {
   const [expandedVideoNoticeId, setExpandedVideoNoticeId] = useState<string | null>(null);
   const [infoNoticeIndex, setInfoNoticeIndex] = useState(0);
 
-  useEffect(() => {
-    if (showLanguageModal) return;
-    try {
-      const done = localStorage.getItem(ONBOARDING_STORAGE_KEY);
-      if (!done) {
-        setShowClassPopup(true);
-      }
-    } catch {
-      // Ignore storage failures
-    }
-  }, [showLanguageModal]);
-
   const closePopup = () => {
     setShowClassPopup(false);
     setPopupClassId(null);
     setPopupFilter('all');
-    try {
-      localStorage.setItem(ONBOARDING_STORAGE_KEY, '1');
-    } catch {
-      // Ignore storage failures
-    }
   };
 
   const openPopup = () => {
@@ -213,11 +196,20 @@ export const LandingPage: React.FC = () => {
   const activeInfoNotice =
     standardNotices.length > 0 ? standardNotices[infoNoticeIndex % standardNotices.length] : null;
 
+  const activeStudentName = userProfile?.fullName || onboardingPrefs?.fullName || '';
+  const activeStudentClassId = userProfile?.classId || onboardingPrefs?.classId || '';
+  const activeClassObj = classes.find((c) => c.classId === activeStudentClassId);
+  const isActiveSenior = activeStudentClassId === 'class-9' || activeStudentClassId === 'class-10';
+  const activeGroup: AcademicGroup | null = isActiveSenior
+    ? preferredGroup || onboardingPrefs?.preferredGroup || null
+    : null;
+  const activeGroupMeta = activeGroup ? GROUP_OPTIONS.find((g) => g.id === activeGroup) : undefined;
+
   return (
     <div className="mx-auto max-w-[1280px] px-4 pb-12 sm:px-6 lg:px-8">
-      {/* Subtle Single-Line Announcement */}
+      {/* Subtle Single-Line Announcement (Crisp, Zero Blur) */}
       {appSettings.homepageSettings.showAnnouncementBanner && (
-        <div className="mt-4 rounded-2xl border border-[#172554]/10 bg-[#E7F5FF]/75 px-4 py-2 text-center text-xs font-medium text-[#172554] backdrop-blur-md dark:border-[#BFE8FF]/15 dark:bg-slate-900/70 dark:text-[#BFE8FF]">
+        <div className="mt-4 rounded-2xl border border-[#172554]/12 bg-[#E7F5FF] px-4 py-2 text-center text-xs font-medium text-[#172554] dark:border-[#BFE8FF]/18 dark:bg-[#0F1736] dark:text-[#BFE8FF]">
           {language === 'bn'
             ? appSettings.homepageSettings.announcementBannerBn
             : appSettings.homepageSettings.announcementBannerEn}
@@ -238,10 +230,10 @@ export const LandingPage: React.FC = () => {
             );
 
             const containerClass = isEmergency
-              ? 'border-red-500/40 bg-red-50/95 text-red-950 shadow-sm dark:border-red-500/35 dark:bg-red-950/55 dark:text-red-50'
+              ? 'border-red-500/40 bg-red-50 text-red-950 shadow-sm dark:border-red-500/35 dark:bg-red-950 dark:text-red-50'
               : isWarning
-                ? 'border-amber-500/40 bg-amber-50/95 text-amber-950 shadow-sm dark:border-amber-500/35 dark:bg-amber-950/50 dark:text-amber-50'
-                : 'border-[#263B91]/25 bg-white/90 text-[#172033] shadow-sm dark:border-[#BFE8FF]/20 dark:bg-slate-900/85 dark:text-slate-100';
+                ? 'border-amber-500/40 bg-amber-50 text-amber-950 shadow-sm dark:border-amber-500/35 dark:bg-amber-950 dark:text-amber-50'
+                : 'border-[#263B91]/25 bg-white text-[#172033] shadow-sm dark:border-[#BFE8FF]/20 dark:bg-[#0F1736] dark:text-slate-100';
 
             const badgeClass = isEmergency
               ? 'bg-red-600 text-white'
@@ -266,7 +258,7 @@ export const LandingPage: React.FC = () => {
             return (
               <div
                 key={notice.announcementId}
-                className={`rounded-3xl border p-4 backdrop-blur-md transition sm:p-5 ${containerClass}`}
+                className={`rounded-3xl border p-4 transition sm:p-5 ${containerClass}`}
               >
                 <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                   <div className="flex flex-1 items-start gap-3">
@@ -378,7 +370,7 @@ export const LandingPage: React.FC = () => {
 
       {/* Compact Standard Notice Strip (Firebase-synced normal notices) */}
       {activeInfoNotice && (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#172554]/12 bg-white/80 px-4 py-2.5 text-xs backdrop-blur-md dark:border-white/12 dark:bg-slate-900/75">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#172554]/12 bg-white px-4 py-2.5 text-xs dark:border-white/12 dark:bg-[#0F1736]">
           <div className="flex min-w-0 flex-1 items-center gap-2.5">
             <span className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-[#172554] px-2 py-0.5 text-[10px] font-bold text-white dark:bg-[#BFE8FF] dark:text-[#172554]">
               <Megaphone className="h-3 w-3" />
@@ -418,15 +410,21 @@ export const LandingPage: React.FC = () => {
         </div>
       )}
 
-      {/* Daily Study Streak Counter Bar */}
-      <section className="mt-4 glass-surface flex flex-wrap items-center justify-between gap-4 rounded-3xl px-5 py-3.5 sm:px-6">
+      {/* Personalized Study Dashboard & Streak Counter Bar */}
+      <section className="mt-4 glass-surface flex flex-wrap items-center justify-between gap-4 rounded-3xl px-5 py-4 sm:px-6">
         <div className="flex items-center gap-3.5">
-          <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-500 to-amber-500 text-white shadow-[0_6px_22px_rgba(249,115,22,0.45)]">
+          <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-500 to-amber-500 text-white shadow-[0_6px_18px_rgba(249,115,22,0.35)]">
             <Flame className="h-5 w-5 fill-current" />
           </div>
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-wider text-orange-600 dark:text-amber-300">
-              {language === 'bn' ? 'দৈনিক পড়াশোনার স্ট্রিক' : 'Daily Study Streak'}
+              {activeStudentName
+                ? language === 'bn'
+                  ? `স্বাগতম, ${activeStudentName}`
+                  : `Welcome, ${activeStudentName}`
+                : language === 'bn'
+                  ? 'দৈনিক পড়াশোনার স্ট্রিক'
+                  : 'Daily Study Streak'}
             </p>
             <div className="mt-0.5 flex flex-wrap items-baseline gap-2">
               <span className="font-display font-mono-nums text-lg font-extrabold text-[#172033] dark:text-white">
@@ -435,10 +433,17 @@ export const LandingPage: React.FC = () => {
               <span className="text-xs font-medium text-[#64748B] dark:text-slate-400">
                 · {studentXp} XP
               </span>
+              {activeClassObj && (
+                <span className="text-xs font-bold text-[#172554] dark:text-[#BFE8FF]">
+                  · {language === 'bn' ? activeClassObj.titleBn : activeClassObj.title}
+                  {activeGroupMeta
+                    ? ` (${language === 'bn' ? activeGroupMeta.titleBn : activeGroupMeta.titleEn.split(' / ')[0]})`
+                    : ''}
+                </span>
+              )}
               {userProfile ? (
                 <span className="text-xs font-semibold text-[#263B91] dark:text-[#BFE8FF]">
-                  · {userProfile.fullName} · {studentBadgesCount}{' '}
-                  {language === 'bn' ? 'ব্যাজ' : 'Badges'} · {studentTrophiesCount}{' '}
+                  · {studentBadgesCount} {language === 'bn' ? 'ব্যাজ' : 'Badges'} · {studentTrophiesCount}{' '}
                   {language === 'bn' ? 'ট্রফি' : 'Trophies'}
                 </span>
               ) : (
@@ -451,18 +456,34 @@ export const LandingPage: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {activeStudentClassId && (
+            <button
+              type="button"
+              onClick={() =>
+                navigate(
+                  `/classes/${activeStudentClassId}${activeGroup ? `?group=${activeGroup}` : ''}`
+                )
+              }
+              className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border border-[#172554]/15 bg-[#E7F5FF] px-3.5 py-2 text-xs font-bold text-[#172554] transition hover:bg-[#BFE8FF]/50 dark:border-[#BFE8FF]/20 dark:bg-slate-800 dark:text-[#BFE8FF]"
+            >
+              <BookOpen className="h-4 w-4" />
+              <span>
+                {language === 'bn' ? 'আমার শ্রেণির বিষয়' : 'My Class Subjects'}
+              </span>
+            </button>
+          )}
           <button
             type="button"
-            onClick={openPopup}
-            className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border border-[#172554]/15 bg-white/85 px-3.5 py-2 text-xs font-semibold text-[#172554] transition hover:bg-[#E7F5FF] dark:border-white/15 dark:bg-slate-800/80 dark:text-[#BFE8FF]"
+            onClick={openOnboardingModal}
+            className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border border-[#172554]/15 bg-white px-3.5 py-2 text-xs font-semibold text-[#172554] transition hover:bg-[#E7F5FF] dark:border-white/15 dark:bg-slate-800 dark:text-[#BFE8FF]"
           >
             <Layers className="h-4 w-4" />
-            <span>{language === 'bn' ? 'কুইক শ্রেণি ও বিষয়' : 'Quick Class Picker'}</span>
+            <span>{language === 'bn' ? 'শ্রেণি ও বিভাগ' : 'Setup / Class'}</span>
           </button>
           <button
             type="button"
             onClick={() => navigate('/leaderboard')}
-            className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border border-[#172554]/15 bg-white/85 px-3.5 py-2 text-xs font-semibold text-[#172554] transition hover:bg-[#E7F5FF] dark:border-white/15 dark:bg-slate-800/80 dark:text-[#BFE8FF]"
+            className="inline-flex min-h-[42px] items-center gap-1.5 rounded-xl border border-[#172554]/15 bg-white px-3.5 py-2 text-xs font-semibold text-[#172554] transition hover:bg-[#E7F5FF] dark:border-white/15 dark:bg-slate-800 dark:text-[#BFE8FF]"
           >
             <Trophy className="h-4 w-4 text-amber-500" />
             <span>{language === 'bn' ? 'লিডারবোর্ড' : 'Leaderboard'}</span>
@@ -514,13 +535,20 @@ export const LandingPage: React.FC = () => {
             const meta = getClassMeta(cls.classId);
             const subjCount = subjects.filter((s) => s.classId === cls.classId).length;
             const lesCount = lessons.filter((l) => l.classId === cls.classId).length;
+            const isMyClass = activeStudentClassId === cls.classId;
+            const targetPath =
+              isMyClass && activeGroup
+                ? `/classes/${cls.classId}?group=${activeGroup}`
+                : `/classes/${cls.classId}`;
 
             return (
               <button
                 key={cls.classId}
                 type="button"
-                onClick={() => navigate(`/classes/${cls.classId}`)}
-                className="glass-surface group flex flex-col justify-between rounded-3xl p-5 text-left transition duration-200 hover:-translate-y-1 hover:border-[#263B91]/45 hover:shadow-lg active:scale-[0.98]"
+                onClick={() => navigate(targetPath)}
+                className={`glass-surface group flex flex-col justify-between rounded-3xl p-5 text-left transition duration-200 hover:-translate-y-1 hover:border-[#263B91]/45 hover:shadow-lg active:scale-[0.98] ${
+                  isMyClass ? 'ring-2 ring-[#263B91] dark:ring-[#BFE8FF]' : ''
+                }`}
               >
                 <div>
                   <div className="flex items-center justify-between gap-2">
@@ -530,7 +558,13 @@ export const LandingPage: React.FC = () => {
                       {meta.numeral}
                     </span>
                     <span className="text-[11px] font-semibold text-[#263B91] dark:text-[#BFE8FF]">
-                      {language === 'bn' ? meta.levelBn : meta.levelEn}
+                      {isMyClass
+                        ? language === 'bn'
+                          ? 'তোমার শ্রেণি'
+                          : 'Your Class'
+                        : language === 'bn'
+                          ? meta.levelBn
+                          : meta.levelEn}
                     </span>
                   </div>
 
@@ -588,7 +622,7 @@ export const LandingPage: React.FC = () => {
               </div>
 
               {searchQuery.trim().length > 0 && (
-                <div className="absolute left-0 right-0 top-full z-30 mt-2 rounded-2xl border border-[#172554]/10 bg-white/95 p-2 shadow-xl backdrop-blur-xl dark:border-white/15 dark:bg-slate-900/95">
+                <div className="absolute left-0 right-0 top-full z-30 mt-2 rounded-2xl border border-[#172554]/12 bg-white p-2 shadow-xl dark:border-white/15 dark:bg-[#0F1736]">
                   {searchResults.length === 0 ? (
                     <p className="px-3 py-2 text-xs text-[#64748B]">{t(language, 'noResults')}</p>
                   ) : (
@@ -773,7 +807,7 @@ export const LandingPage: React.FC = () => {
 
       {/* Quick Class & Subject Onboarding Popup Modal */}
       {showClassPopup && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/60 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/65 p-0 sm:items-center sm:p-4">
           <div className="glass-surface flex max-h-[90dvh] w-full max-w-3xl flex-col rounded-t-3xl p-5 pb-safe shadow-2xl sm:rounded-3xl sm:p-7">
             <div className="flex items-center justify-between gap-3 border-b border-[#172554]/10 pb-4 dark:border-white/10">
               <div className="flex items-center gap-2.5">

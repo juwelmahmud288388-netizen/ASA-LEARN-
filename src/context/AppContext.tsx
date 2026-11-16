@@ -67,15 +67,27 @@ import type {
   ResourceItem,
   StudentNote,
   StudentProgress,
+  SubjectGroup,
   SubjectItem,
   ThemeMode,
   TopicItem,
   UserProfile,
 } from '../types';
 
+export type AcademicGroup = Exclude<SubjectGroup, 'common'>;
+
+export interface OnboardingPreferences {
+  fullName: string;
+  classId: string;
+  preferredGroup: AcademicGroup | null;
+}
+
 const OWNER_EMAILS = ['stt117969@gmail.com', 'juwelmahmud288388@gmail.com'];
 const ADMIN_TOKEN_STORAGE_KEY = 'asa_admin_token';
 const STUDENT_TOKEN_STORAGE_KEY = 'asa_student_token';
+const PREFERRED_GROUP_STORAGE_KEY = 'asa_preferred_group_v1';
+const ONBOARDING_PREFS_STORAGE_KEY = 'asa_student_onboarding_v1';
+const ONBOARDING_DONE_STORAGE_KEY = 'asa_onboarding_done';
 
 function isOwnerEmail(email?: string | null): boolean {
   return Boolean(email && OWNER_EMAILS.includes(email.trim().toLowerCase()));
@@ -186,6 +198,19 @@ interface AppContextValue {
   studentModalTab: 'create' | 'unlock';
   openStudentModal: (tab?: 'create' | 'unlock') => void;
   closeStudentModal: () => void;
+  preferredGroup: AcademicGroup | null;
+  setPreferredGroup: (group: AcademicGroup | null) => void;
+  onboardingPrefs: OnboardingPreferences | null;
+  onboardingDone: boolean;
+  onboardingOpen: boolean;
+  openOnboardingModal: () => void;
+  closeOnboardingModal: (markDone?: boolean) => void;
+  completeOnboarding: (payload: {
+    fullName: string;
+    classId: string;
+    preferredGroup: AcademicGroup | null;
+    language?: Language;
+  }) => Promise<void>;
   aiDrawerOpen: boolean;
   setAiDrawerOpen: (open: boolean) => void;
   aiContextLesson: LessonItem | null;
@@ -264,6 +289,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [aiInitialMode, setAiInitialMode] = useState<string | null>(null);
   const [studentModalOpen, setStudentModalOpen] = useState(false);
   const [studentModalTab, setStudentModalTab] = useState<'create' | 'unlock'>('create');
+
+  const [preferredGroup, setPreferredGroupState] = useState<AcademicGroup | null>(() => {
+    try {
+      const saved = localStorage.getItem(PREFERRED_GROUP_STORAGE_KEY);
+      return saved === 'science' || saved === 'arts' || saved === 'commerce' ? saved : null;
+    } catch {
+      return null;
+    }
+  });
+  const [onboardingPrefs, setOnboardingPrefs] = useState<OnboardingPreferences | null>(() => {
+    try {
+      const raw = localStorage.getItem(ONBOARDING_PREFS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<OnboardingPreferences>;
+        if (parsed.fullName && parsed.classId) {
+          const grp =
+            parsed.preferredGroup === 'science' ||
+            parsed.preferredGroup === 'arts' ||
+            parsed.preferredGroup === 'commerce'
+              ? parsed.preferredGroup
+              : null;
+          return {
+            fullName: String(parsed.fullName),
+            classId: String(parsed.classId),
+            preferredGroup: grp,
+          };
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  });
+  const [onboardingDone, setOnboardingDone] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(ONBOARDING_DONE_STORAGE_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const [onboardingOpen, setOnboardingOpen] = useState<boolean>(false);
 
   const navigate = useCallback((to: string) => {
     if (to !== window.location.pathname) {
@@ -1724,6 +1790,117 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [userProfile?.uid, firebaseUser?.uid]);
 
+  const setPreferredGroup = useCallback((group: AcademicGroup | null) => {
+    setPreferredGroupState(group);
+    try {
+      if (group) {
+        localStorage.setItem(PREFERRED_GROUP_STORAGE_KEY, group);
+      } else {
+        localStorage.removeItem(PREFERRED_GROUP_STORAGE_KEY);
+      }
+    } catch {
+      // ignore
+    }
+    setOnboardingPrefs((prev) => {
+      if (!prev) return prev;
+      const next: OnboardingPreferences = { ...prev, preferredGroup: group };
+      try {
+        localStorage.setItem(ONBOARDING_PREFS_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (authLoading || showLanguageModal) return;
+    if (route === '/admin') return;
+    if (!userProfile && !onboardingDone) {
+      setOnboardingOpen(true);
+    }
+  }, [authLoading, showLanguageModal, userProfile, onboardingDone, route]);
+
+  const openOnboardingModal = useCallback(() => {
+    setOnboardingOpen(true);
+  }, []);
+
+  const closeOnboardingModal = useCallback((markDone = true) => {
+    setOnboardingOpen(false);
+    if (markDone) {
+      setOnboardingDone(true);
+      try {
+        localStorage.setItem(ONBOARDING_DONE_STORAGE_KEY, '1');
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
+
+  const completeOnboarding = useCallback(
+    async (payload: {
+      fullName: string;
+      classId: string;
+      preferredGroup: AcademicGroup | null;
+      language?: Language;
+    }) => {
+      const cleanName = payload.fullName.trim();
+      const targetClassId = payload.classId || 'class-9';
+      const isSeniorClass = targetClassId === 'class-9' || targetClassId === 'class-10';
+      const resolvedGroup: AcademicGroup | null = isSeniorClass ? payload.preferredGroup : null;
+      const targetLang = payload.language || language;
+
+      const prefs: OnboardingPreferences = {
+        fullName: cleanName,
+        classId: targetClassId,
+        preferredGroup: resolvedGroup,
+      };
+      setOnboardingPrefs(prefs);
+      setPreferredGroupState(resolvedGroup);
+      setOnboardingDone(true);
+
+      try {
+        localStorage.setItem(ONBOARDING_PREFS_STORAGE_KEY, JSON.stringify(prefs));
+        localStorage.setItem(ONBOARDING_DONE_STORAGE_KEY, '1');
+        if (resolvedGroup) {
+          localStorage.setItem(PREFERRED_GROUP_STORAGE_KEY, resolvedGroup);
+        } else {
+          localStorage.removeItem(PREFERRED_GROUP_STORAGE_KEY);
+        }
+      } catch {
+        // ignore storage failures
+      }
+
+      if (payload.language && payload.language !== language) {
+        await setLanguage(payload.language);
+      }
+
+      if (!userProfile) {
+        const autoPasscode = `asa-${createClientId('key').slice(-8)}`;
+        try {
+          await createStudentProfile({
+            fullName: cleanName,
+            classId: targetClassId,
+            preferredLanguage: targetLang,
+            password: autoPasscode,
+          });
+        } catch {
+          // Onboarding local preferences are saved cleanly even if profile sync retries later
+        }
+      } else {
+        await updateUserProfile({
+          fullName: cleanName,
+          classId: targetClassId,
+          preferredLanguage: targetLang,
+        }).catch(() => {});
+      }
+
+      setOnboardingOpen(false);
+      navigate('/');
+    },
+    [language, setLanguage, userProfile, createStudentProfile, updateUserProfile, navigate]
+  );
+
   const openStudentModal = useCallback((tab: 'create' | 'unlock' = 'create') => {
     setStudentModalTab(tab);
     setStudentModalOpen(true);
@@ -1798,6 +1975,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     studentModalTab,
     openStudentModal,
     closeStudentModal,
+    preferredGroup,
+    setPreferredGroup,
+    onboardingPrefs,
+    onboardingDone,
+    onboardingOpen,
+    openOnboardingModal,
+    closeOnboardingModal,
+    completeOnboarding,
     aiDrawerOpen,
     setAiDrawerOpen,
     aiContextLesson,

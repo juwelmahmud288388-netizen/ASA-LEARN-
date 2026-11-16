@@ -108,7 +108,7 @@ export const Navbar: React.FC = () => {
 
       {/* Responsive Mobile Drawer */}
       {mobileOpen && (
-        <div className="max-h-[80dvh] overflow-y-auto border-t border-[#172554]/10 bg-white/95 px-4 py-4 backdrop-blur-xl dark:border-white/10 dark:bg-[#0A1128]/95 md:hidden">
+        <div className="max-h-[80dvh] overflow-y-auto border-t border-[#172554]/10 bg-white px-4 py-4 dark:border-white/10 dark:bg-[#0A1128] md:hidden">
           <div className="flex flex-col gap-1.5">
             {navItems.map((item) => (
               <button

@@ -210,7 +210,7 @@ export const LeaderboardPage: React.FC = () => {
       {/* Safe Public Profile Showcase Modal (Zero Chat, Zero PII) */}
       {selectedScholar && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/60 p-0 sm:items-center sm:p-4"
           onClick={() => setSelectedScholar(null)}
         >
           <div

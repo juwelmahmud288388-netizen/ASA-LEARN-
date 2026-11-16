@@ -1741,7 +1741,7 @@ export const AdminDashboard: React.FC = () => {
           )}
 
           {statusMsg && (
-            <div className="flex items-center justify-between gap-2 rounded-2xl border border-emerald-500/30 bg-emerald-50/90 px-4 py-3 text-xs font-semibold text-emerald-700 backdrop-blur dark:bg-emerald-950/70 dark:text-emerald-200">
+            <div className="flex items-center justify-between gap-2 rounded-2xl border border-emerald-500/30 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4 shrink-0" />
                 <span>{statusMsg}</span>

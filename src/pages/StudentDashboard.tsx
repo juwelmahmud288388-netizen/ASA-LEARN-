@@ -28,7 +28,8 @@ import { BADGE_CATALOG, getBorderMeta, TROPHY_CATALOG } from '../lib/gamificatio
 import { localSubmitFeedback } from '../lib/localBackend';
 import { safeJsonFetch, shouldFallbackToLocal } from '../lib/safeFetch';
 import { BRAND_LOGO_PATH, createClientId, formatTimestamp } from '../lib/utils';
-import { getStudentAuthHeaders, useApp } from '../context/AppContext';
+import { GROUP_OPTIONS } from '../lib/subjectIcons';
+import { type AcademicGroup, getStudentAuthHeaders, useApp } from '../context/AppContext';
 import { t } from '../i18n/translations';
 import { TrophyRoom } from '../components/TrophyRoom';
 
@@ -57,6 +58,8 @@ export const StudentDashboard: React.FC = () => {
     saveNote,
     deleteNote,
     updateUserProfile,
+    preferredGroup,
+    setPreferredGroup,
     dailyCheckIn,
     openStudentModal,
     logout,
@@ -81,6 +84,7 @@ export const StudentDashboard: React.FC = () => {
   // Profile form
   const [fullName, setFullName] = useState(userProfile?.fullName || '');
   const [classId, setClassId] = useState(userProfile?.classId || 'class-9');
+  const [groupId, setGroupId] = useState<AcademicGroup>(preferredGroup || 'science');
   const [dailyGoal, setDailyGoal] = useState(userProfile?.dailyGoalMinutes || 45);
   const [profileSaved, setProfileSaved] = useState(false);
 
@@ -92,6 +96,10 @@ export const StudentDashboard: React.FC = () => {
     }
   }, [userProfile]);
 
+  useEffect(() => {
+    if (preferredGroup) setGroupId(preferredGroup);
+  }, [preferredGroup]);
+
   // Feedback state
   const [fbRating, setFbRating] = useState(5);
   const [fbMessage, setFbMessage] = useState('');
@@ -101,10 +109,20 @@ export const StudentDashboard: React.FC = () => {
   const [certChapterId, setCertChapterId] = useState<string | null>(null);
 
   const studentClassId = userProfile?.classId || 'class-9';
-  const classSubjects = useMemo(
-    () => subjects.filter((s) => s.classId === studentClassId),
-    [subjects, studentClassId]
-  );
+  const isStudentSenior = studentClassId === 'class-9' || studentClassId === 'class-10';
+  const activeGroupMeta =
+    isStudentSenior && preferredGroup
+      ? GROUP_OPTIONS.find((g) => g.id === preferredGroup)
+      : undefined;
+
+  const classSubjects = useMemo(() => {
+    const base = subjects.filter((s) => s.classId === studentClassId);
+    if (!isStudentSenior || !preferredGroup) return base;
+    return base.filter((s) => {
+      const groups = s.groups && s.groups.length > 0 ? s.groups : ['common'];
+      return groups.includes('common') || groups.includes(preferredGroup);
+    });
+  }, [subjects, studentClassId, isStudentSenior, preferredGroup]);
   const classLessons = useMemo(
     () => lessons.filter((l) => l.classId === studentClassId),
     [lessons, studentClassId]
@@ -213,6 +231,8 @@ export const StudentDashboard: React.FC = () => {
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
+    const isFormSenior = classId === 'class-9' || classId === 'class-10';
+    setPreferredGroup(isFormSenior ? groupId : null);
     await updateUserProfile({
       fullName: fullName || userProfile?.fullName,
       classId,
@@ -396,6 +416,9 @@ export const StudentDashboard: React.FC = () => {
                 <p className="text-xs font-semibold text-[#263B91] dark:text-[#BFE8FF]">
                   {classes.find((c) => c.classId === studentClassId)?.[language === 'bn' ? 'titleBn' : 'title'] ||
                     studentClassId}
+                  {activeGroupMeta
+                    ? ` · ${language === 'bn' ? activeGroupMeta.titleBn : activeGroupMeta.titleEn}`
+                    : ''}
                 </p>
                 <h1 className="font-display mt-1 text-2xl font-bold text-[#172033] dark:text-white">
                   {t(language, 'welcomeBack')}, {userProfile?.fullName || 'Student'}
@@ -993,6 +1016,30 @@ export const StudentDashboard: React.FC = () => {
                     </select>
                   </div>
                 </div>
+
+                {(classId === 'class-9' || classId === 'class-10') && (
+                  <div>
+                    <label className="block text-xs font-semibold text-[#172033] dark:text-slate-200">
+                      {language === 'bn' ? 'একাডেমিক বিভাগ (নবম–দশম)' : 'Academic Group (Class 9–10)'}
+                    </label>
+                    <div className="mt-1.5 grid grid-cols-3 gap-2 max-w-md">
+                      {GROUP_OPTIONS.map((grp) => (
+                        <button
+                          key={grp.id}
+                          type="button"
+                          onClick={() => setGroupId(grp.id)}
+                          className={`rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+                            groupId === grp.id
+                              ? 'border-[#172554] bg-[#172554] text-white dark:border-[#BFE8FF] dark:bg-[#BFE8FF] dark:text-[#172554]'
+                              : 'border-[#172554]/15 bg-white text-[#172033] dark:border-white/15 dark:bg-slate-800 dark:text-white'
+                          }`}
+                        >
+                          {language === 'bn' ? grp.titleBn : grp.titleEn.split(' / ')[0]}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-semibold text-[#172033] dark:text-slate-200">

@@ -24,8 +24,8 @@ export const Footer: React.FC = () => {
         ];
 
   return (
-    <footer className="mt-20 border-t border-[#172554]/10 bg-white/65 backdrop-blur-md dark:border-white/10 dark:bg-[#070E24]/85">
-      <div className="mx-auto max-w-[1320px] px-4 pt-12 pb-24 sm:px-6 md:pb-10 lg:px-8">
+    <footer className="mt-20 border-t border-[#172554]/10 bg-white dark:border-white/10 dark:bg-[#070E24]">
+      <div className="mx-auto max-w-[1320px] px-4 pt-12 pb-28 sm:px-6 md:pb-10 lg:px-8">
         <div className="grid grid-cols-1 gap-10 md:grid-cols-12">
           {/* Brand Info & Quick Toggles */}
           <div className="md:col-span-4">

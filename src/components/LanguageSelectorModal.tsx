@@ -19,7 +19,7 @@ export const LanguageSelectorModal: React.FC = () => {
       role="dialog"
       aria-modal="true"
       aria-labelledby="lang-modal-title"
-      className="fixed inset-0 z-50 flex items-end justify-center bg-[#070E24]/60 p-0 backdrop-blur-md sm:items-center sm:p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-[#070E24]/70 p-0 sm:items-center sm:p-4"
     >
       <div className="glass-surface w-full max-w-md rounded-t-3xl p-6 pb-safe text-center sm:rounded-3xl sm:p-8">
         <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-[#E7F5FF] p-2 dark:bg-slate-800/90">

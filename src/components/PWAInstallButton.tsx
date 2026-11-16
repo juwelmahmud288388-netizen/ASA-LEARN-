@@ -100,7 +100,7 @@ export const PWAInstallButton: React.FC<{
             role="dialog"
             aria-modal="true"
             aria-label={t(language, 'installApp')}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 p-4"
             onClick={() => setShowInstallPopup(false)}
           >
             <div

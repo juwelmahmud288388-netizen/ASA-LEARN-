@@ -594,8 +594,8 @@ export const AiTutorWidget: React.FC = () => {
 
       {/* Clean Slide-Over Drawer */}
       {aiDrawerOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/35 backdrop-blur-xs">
-          <aside className="flex h-[100dvh] w-full max-w-lg flex-col border-l border-white/50 bg-[#F5F9FF]/95 backdrop-blur-2xl dark:border-white/10 dark:bg-[#0A1128]/95">
+        <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50">
+          <aside className="flex h-[100dvh] w-full max-w-lg flex-col border-l border-[#172554]/12 bg-[#F5F9FF] dark:border-white/10 dark:bg-[#0A1128]">
             {/* Compact Branded Header */}
             <div className="flex items-center justify-between gap-2 border-b border-[#172554]/10 px-4 py-3 dark:border-white/10">
               <div className="flex min-w-0 items-center gap-2.5">

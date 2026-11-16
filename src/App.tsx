@@ -6,6 +6,7 @@ import { Logo3DLoader } from './components/Logo3DLoader';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { Navbar } from './components/Navbar';
 import { OfflineIndicator } from './components/PWAInstallButton';
+import { ProfileOnboardingModal } from './components/ProfileOnboardingModal';
 import { StudentProfileModal } from './components/StudentProfileModal';
 import { AppProvider, useApp } from './context/AppContext';
 import { AdminDashboard } from './pages/AdminDashboard';
@@ -99,7 +100,7 @@ const AppShell: React.FC = () => {
       />
       <div className="min-h-screen overflow-x-clip">
         <Navbar />
-        <main className="min-h-[75dvh] pb-24 md:pb-0">
+        <main className="min-h-[75dvh] pb-28 md:pb-0">
           <div key={route.split('?')[0] || '/'} className="page-enter">
             <AppErrorBoundary>
               <RouterView />
@@ -110,6 +111,7 @@ const AppShell: React.FC = () => {
         <MobileBottomNav />
         <AiTutorWidget />
         <LanguageSelectorModal />
+        <ProfileOnboardingModal />
         <StudentProfileModal />
         <OfflineIndicator />
       </div>

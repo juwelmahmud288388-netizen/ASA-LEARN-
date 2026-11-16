@@ -30,6 +30,7 @@ export const ClassDirectoryPage: React.FC = () => {
     language,
     firebaseUser,
     userProfile,
+    preferredGroup,
     classes,
     subjects,
     chapters,
@@ -70,12 +71,15 @@ export const ClassDirectoryPage: React.FC = () => {
   }, [urlCat, route]);
 
   useEffect(() => {
+    const isSenior = selectedClassId === 'class-9' || selectedClassId === 'class-10';
     if (urlGroup === 'science' || urlGroup === 'arts' || urlGroup === 'commerce') {
       setSubjectFilter(urlGroup);
+    } else if (isSenior && preferredGroup) {
+      setSubjectFilter(preferredGroup);
     } else {
       setSubjectFilter('all');
     }
-  }, [urlGroup, selectedClassId]);
+  }, [urlGroup, selectedClassId, preferredGroup]);
 
   const activeClass = useMemo(
     () => (selectedClassId ? classes.find((c) => c.classId === selectedClassId) : undefined),
@@ -426,7 +430,7 @@ export const ClassDirectoryPage: React.FC = () => {
           </div>
 
           {/* Quick Class Switcher Pills */}
-          <div className="flex flex-nowrap gap-1 overflow-x-auto no-scrollbar rounded-2xl bg-white/75 p-1 backdrop-blur-md sm:flex-wrap dark:bg-slate-900/75">
+          <div className="flex flex-nowrap gap-1 overflow-x-auto no-scrollbar rounded-2xl border border-[#172554]/10 bg-white p-1 sm:flex-wrap dark:border-white/10 dark:bg-[#0F1736]">
             {classes.map((cls) => (
               <button
                 key={cls.classId}
@@ -648,7 +652,7 @@ export const ClassDirectoryPage: React.FC = () => {
         </div>
 
         {/* Dual-Track Pill Switcher */}
-        <div className="inline-flex self-start rounded-2xl border border-[#172554]/10 bg-white/80 p-1.5 backdrop-blur-md sm:self-auto dark:border-white/10 dark:bg-slate-900/80">
+        <div className="inline-flex self-start rounded-2xl border border-[#172554]/10 bg-white p-1.5 sm:self-auto dark:border-white/10 dark:bg-[#0F1736]">
           <button
             type="button"
             onClick={() => setLearningTab('basic_to_pro')}
@@ -894,7 +898,7 @@ export const ClassDirectoryPage: React.FC = () => {
             <button
               type="button"
               onClick={() => openAiWithLesson(activeOneShotLesson || null, 'chapter_summary')}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-white/15 px-4 py-2 text-xs font-bold text-white backdrop-blur hover:bg-white/25"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-white/20 px-4 py-2 text-xs font-bold text-white hover:bg-white/30"
             >
               <Sparkles className="h-3.5 w-3.5" />
               <span>{language === 'bn' ? 'AI দ্রুত রিভিশন' : 'AI Quick Summary'}</span>

@@ -10,8 +10,9 @@ import {
   UserPlus,
   X,
 } from 'lucide-react';
-import { useApp } from '../context/AppContext';
+import { type AcademicGroup, useApp } from '../context/AppContext';
 import { t } from '../i18n/translations';
+import { GROUP_OPTIONS } from '../lib/subjectIcons';
 import { BRAND_LOGO_PATH, getLogoContrastClass } from '../lib/utils';
 import type { Language } from '../types';
 
@@ -22,6 +23,8 @@ export const StudentProfileModal: React.FC = () => {
     closeStudentModal,
     language,
     classes,
+    preferredGroup,
+    setPreferredGroup,
     createStudentProfile,
     unlockStudentProfile,
     navigate,
@@ -35,6 +38,7 @@ export const StudentProfileModal: React.FC = () => {
 
   const [fullName, setFullName] = useState('');
   const [classId, setClassId] = useState(classes[3]?.classId || classes[0]?.classId || 'class-9');
+  const [groupId, setGroupId] = useState<AcademicGroup>(preferredGroup || 'science');
   const [prefLang, setPrefLang] = useState<Language>(language);
   const [newPass, setNewPass] = useState('');
   const [showNewPass, setShowNewPass] = useState(false);
@@ -42,13 +46,16 @@ export const StudentProfileModal: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const isSeniorClass = classId === 'class-9' || classId === 'class-10';
+
   useEffect(() => {
     if (studentModalOpen) {
       setTab(studentModalTab);
       setPrefLang(language);
+      setGroupId(preferredGroup || 'science');
       setError(null);
     }
-  }, [studentModalOpen, studentModalTab, language]);
+  }, [studentModalOpen, studentModalTab, language, preferredGroup]);
 
   if (!studentModalOpen) return null;
 
@@ -95,6 +102,7 @@ export const StudentProfileModal: React.FC = () => {
     }
     setLoading(true);
     try {
+      setPreferredGroup(isSeniorClass ? groupId : null);
       await createStudentProfile({
         fullName,
         classId,
@@ -114,7 +122,7 @@ export const StudentProfileModal: React.FC = () => {
       role="dialog"
       aria-modal="true"
       aria-labelledby="student-profile-modal-title"
-      className="fixed inset-0 z-50 flex items-end justify-center bg-[#070E24]/60 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-[#070E24]/70 p-0 sm:items-center sm:p-4"
       onClick={closeStudentModal}
     >
       <div
@@ -265,6 +273,30 @@ export const StudentProfileModal: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {isSeniorClass && (
+              <div>
+                <label className="block text-xs font-semibold text-[#172033] dark:text-slate-200">
+                  {language === 'bn' ? 'একাডেমিক বিভাগ (নবম–দশম)' : 'Academic Group (Class 9–10)'}
+                </label>
+                <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+                  {GROUP_OPTIONS.map((grp) => (
+                    <button
+                      key={grp.id}
+                      type="button"
+                      onClick={() => setGroupId(grp.id)}
+                      className={`rounded-xl border px-2 py-2.5 text-center text-xs font-semibold transition ${
+                        groupId === grp.id
+                          ? 'border-[#172554] bg-[#172554] text-white dark:border-[#BFE8FF] dark:bg-[#BFE8FF] dark:text-[#172554]'
+                          : 'border-[#172554]/15 bg-white text-[#172033] dark:border-white/15 dark:bg-slate-800 dark:text-white'
+                      }`}
+                    >
+                      {language === 'bn' ? grp.titleBn : grp.titleEn.split(' / ')[0]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="block text-xs font-semibold text-[#172033] dark:text-slate-200">
