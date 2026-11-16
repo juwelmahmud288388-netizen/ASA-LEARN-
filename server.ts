@@ -494,57 +494,6 @@ function saveContentOverrides(store: ContentOverrideStore): void {
   fs.writeFileSync(CONTENT_OVERRIDE_FILE, JSON.stringify(store, null, 2), { mode: 0o600 });
 }
 
-const SHOWCASE_LEADERBOARD_SCHOLARS = [
-  {
-    uid: 'scholar_arafat_10',
-    studentId: 'ASA-1001',
-    fullName: 'Arafat Hossain',
-    classId: 'class-10',
-    streakDays: 14,
-    xp: 1480,
-    completedLessonsCount: 18,
-    quizScoreTotal: 22,
-    baseLikes: 19,
-    activeBorder: 'aurora_3d',
-  },
-  {
-    uid: 'scholar_nusrat_9',
-    studentId: 'ASA-1002',
-    fullName: 'Nusrat Jahan Mim',
-    classId: 'class-9',
-    streakDays: 11,
-    xp: 1120,
-    completedLessonsCount: 14,
-    quizScoreTotal: 17,
-    baseLikes: 15,
-    activeBorder: 'gold_champion',
-  },
-  {
-    uid: 'scholar_tahmid_8',
-    studentId: 'ASA-1003',
-    fullName: 'Tahmidul Islam',
-    classId: 'class-8',
-    streakDays: 8,
-    xp: 840,
-    completedLessonsCount: 10,
-    quizScoreTotal: 12,
-    baseLikes: 11,
-    activeBorder: 'gold_champion',
-  },
-  {
-    uid: 'scholar_sadia_7',
-    studentId: 'ASA-1004',
-    fullName: 'Sadia Afrin',
-    classId: 'class-7',
-    streakDays: 5,
-    xp: 520,
-    completedLessonsCount: 6,
-    quizScoreTotal: 8,
-    baseLikes: 8,
-    activeBorder: 'emerald_scholar',
-  },
-];
-
 async function generateLessonPracticeWithAi(opts: {
   lessonId: string;
   title: string;
@@ -1817,117 +1766,151 @@ async function startServer() {
         return;
       }
 
-      // Match relevant study PDFs & notes from platform resources
-      const seed = buildInitialSeedData();
-      const overrides = loadContentOverrides();
-      const allResources = mergeCollectionWithOverrides(
-        seed.resources as unknown as Array<Record<string, unknown>>,
-        'resourceId',
-        'resources',
-        overrides
-      );
-      const allLessons = mergeCollectionWithOverrides(
-        seed.lessons as unknown as Array<Record<string, unknown>>,
-        'lessonId',
-        'lessons',
-        overrides
-      );
-      const allSubjects = mergeCollectionWithOverrides(
-        seed.subjects as unknown as Array<Record<string, unknown>>,
-        'subjectId',
-        'subjects',
-        overrides
-      );
+      // Only attach study PDFs & notes when the student explicitly asks for PDFs, notes, links, or study files
+      const wantsResources =
+        /\b(pdf|notes?|sheet|book|books|link|links|file|download|resource|resources)\b|পিডিএফ|নোট|বই|শিট|লিংক|ডাউনলোড/i.test(
+          cleanMessage
+        );
 
-      const lessonMap = new Map(allLessons.map((l) => [String(l.lessonId || ''), l]));
-      const subjectMap = new Map(allSubjects.map((s) => [String(s.subjectId || ''), s]));
-      const queryTokens = `${cleanMessage} ${classContext} ${subjectContext} ${lessonContext}`
-        .toLowerCase()
-        .split(/[\s,?.!।]+/)
-        .filter((tok) => tok.length >= 2);
+      let scoredResources: Array<{
+        resourceId: string;
+        lessonId: string;
+        title: string;
+        titleBn?: string;
+        fileUrl: string;
+        fileType: string;
+      }> = [];
 
-      const scoredResources = allResources
-        .map((r) => {
-          const les = lessonMap.get(String(r.lessonId || ''));
-          const sub = les ? subjectMap.get(String(les.subjectId || '')) : undefined;
-          const haystack = [
-            r.title,
-            r.titleBn,
-            les?.title,
-            les?.titleBn,
-            les?.classId,
-            sub?.title,
-            sub?.titleBn,
-          ]
-            .filter(Boolean)
-            .join(' ')
-            .toLowerCase();
+      if (wantsResources) {
+        const seed = buildInitialSeedData();
+        const overrides = loadContentOverrides();
+        const allResources = mergeCollectionWithOverrides(
+          seed.resources as unknown as Array<Record<string, unknown>>,
+          'resourceId',
+          'resources',
+          overrides
+        );
+        const allLessons = mergeCollectionWithOverrides(
+          seed.lessons as unknown as Array<Record<string, unknown>>,
+          'lessonId',
+          'lessons',
+          overrides
+        );
+        const allSubjects = mergeCollectionWithOverrides(
+          seed.subjects as unknown as Array<Record<string, unknown>>,
+          'subjectId',
+          'subjects',
+          overrides
+        );
 
-          let score = 0;
-          for (const tok of queryTokens) {
-            if (haystack.includes(tok)) score += 2;
-          }
-          if (subjectContext && haystack.includes(String(subjectContext).toLowerCase())) score += 3;
-          if (lessonContext && les && String(les.title || '').toLowerCase().includes(String(lessonContext).toLowerCase())) {
-            score += 4;
-          }
-          return { resource: r, score };
-        })
-        .filter((entry) => entry.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 3)
-        .map((entry) => ({
-          resourceId: String(entry.resource.resourceId || ''),
-          lessonId: String(entry.resource.lessonId || ''),
-          title: String(entry.resource.title || ''),
-          titleBn: entry.resource.titleBn ? String(entry.resource.titleBn) : undefined,
-          fileUrl: String(entry.resource.fileUrl || ''),
-          fileType: String(entry.resource.fileType || 'PDF'),
-        }));
+        const lessonMap = new Map(allLessons.map((l) => [String(l.lessonId || ''), l]));
+        const subjectMap = new Map(allSubjects.map((s) => [String(s.subjectId || ''), s]));
+        const queryTokens = `${cleanMessage} ${classContext} ${subjectContext} ${lessonContext}`
+          .toLowerCase()
+          .split(/[\s,?.!।]+/)
+          .filter((tok) => tok.length >= 2);
+
+        scoredResources = allResources
+          .map((r) => {
+            const les = lessonMap.get(String(r.lessonId || ''));
+            const sub = les ? subjectMap.get(String(les.subjectId || '')) : undefined;
+            const haystack = [
+              r.title,
+              r.titleBn,
+              les?.title,
+              les?.titleBn,
+              les?.classId,
+              sub?.title,
+              sub?.titleBn,
+            ]
+              .filter(Boolean)
+              .join(' ')
+              .toLowerCase();
+
+            let score = 0;
+            for (const tok of queryTokens) {
+              if (haystack.includes(tok)) score += 2;
+            }
+            if (subjectContext && haystack.includes(String(subjectContext).toLowerCase())) score += 3;
+            if (lessonContext && les && String(les.title || '').toLowerCase().includes(String(lessonContext).toLowerCase())) {
+              score += 4;
+            }
+            return { resource: r, score };
+          })
+          .filter((entry) => entry.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 3)
+          .map((entry) => ({
+            resourceId: String(entry.resource.resourceId || ''),
+            lessonId: String(entry.resource.lessonId || ''),
+            title: String(entry.resource.title || ''),
+            titleBn: entry.resource.titleBn ? String(entry.resource.titleBn) : undefined,
+            fileUrl: String(entry.resource.fileUrl || ''),
+            fileType: String(entry.resource.fileType || 'PDF'),
+          }));
+      }
 
       const availableNotesContext =
-        scoredResources.length > 0
-          ? `Relevant ASA,LEARN Study Notes/PDFs matching this query:\n${scoredResources
-              .map((resItem) => `- ${resItem.title}${resItem.titleBn ? ` (${resItem.titleBn})` : ''} [Available directly below reply]`)
+        wantsResources && scoredResources.length > 0
+          ? `Matching Study Notes/PDFs requested by student:\n${scoredResources
+              .map((resItem) => `- ${resItem.title}${resItem.titleBn ? ` (${resItem.titleBn})` : ''} [Shown below reply]`)
               .join('\n')}`
           : '';
 
       const modeHint =
         mode === 'chapter_summary'
-          ? 'The student requested a quick summary/breakdown of this topic or video lesson. Present a crystal-clear, bullet-point summary so they grasp the entire concept at a glance.'
+          ? 'The student requested a quick summary of this lesson/topic. Give a brief, crisp bullet-point summary only.'
           : '';
 
+      const coreTutorRules = [
+        'You are the "ASA LEARN AI Tutor" (Asha Learning AI Tutor), a smart, fast, and precise digital teacher active in the chat widget of the ASA LEARN website.',
+        'Direct & Concise (No Fluff): Answer ONLY what the student asks. Never provide unsolicited extra information, unnecessary background essays, or random PDF links unless explicitly requested. Keep explanations crisp and straight to the point.',
+        'Conversational Continuity: Remember earlier messages in the current chat session so follow-up questions work naturally without asking the student to repeat themselves.',
+        'High Speed & Efficiency: Structure responses to be fast, brief, and immediately readable. Avoid long introductory or concluding remarks.',
+        'All-Subject Support: Handle questions across math, science, history, languages, or video contexts accurately.',
+        'Teacher Persona: Maintain an encouraging, patient teacher tone, breaking down concepts briefly with core logic if needed.',
+        'Language & Formatting: Reply in fluent, polite Bengali. Use clean Markdown, bold text, and bullet points only when necessary for brevity.',
+      ].join('\n');
+
       const systemInstruction = [
-        aiSettings.systemInstructions,
-        'Always respond in fluent, polite, encouraging Bengali (বাংলা) using clean Markdown (**bold** highlights and `-` bullet points), formatted cleanly for a compact chat widget.',
-        'Act like a patient, caring teacher: break complex concepts into small steps with real-world examples and explain the core logic clearly rather than only giving final answers.',
+        coreTutorRules,
+        aiSettings.systemInstructions && !aiSettings.systemInstructions.includes('Summary & Clear Breakdown')
+          ? `Additional Admin Guidance: ${aiSettings.systemInstructions}`
+          : '',
         classContext ? `Student Class: ${classContext}.` : '',
         subjectContext ? `Subject Focus: ${subjectContext}.` : '',
         lessonContext ? `Current Lesson / Video Context: ${lessonContext}.` : '',
-        `Interface Language Setting: ${language === 'bn' ? 'Bengali' : 'English (still communicate primarily in fluent, polite Bengali as requested by Asha Learning AI Tutor guidelines unless the student explicitly requests English-only)'}.`,
+        `Interface Language: ${language === 'bn' ? 'Bengali' : 'English (reply in fluent, polite Bengali unless the student asks specifically for English)'}.`,
         modeHint,
         availableNotesContext,
       ]
         .filter(Boolean)
         .join('\n');
 
-      const recentHistory = Array.isArray(history)
+      const normalizedHistory = Array.isArray(history)
         ? history
-            .slice(-6)
-            .map((h: { role?: string; text?: string }) => `${h.role === 'user' ? 'Student' : 'Tutor'}: ${String(h.text || '').slice(0, 800)}`)
-            .join('\n')
-        : '';
+            .slice(-14)
+            .filter((h: { text?: string }) => String(h?.text || '').trim().length > 0)
+            .map((h: { role?: string; text?: string }) => ({
+              role: (h.role === 'assistant' || h.role === 'model' ? 'model' : 'user') as 'user' | 'model',
+              parts: [{ text: String(h.text || '').trim().slice(0, 1800) }],
+            }))
+        : [];
 
-      const promptText = recentHistory
-        ? `Previous context:\n${recentHistory}\n\nStudent Question: ${cleanMessage}`
-        : cleanMessage;
+      const multiTurnContents = [
+        ...normalizedHistory,
+        { role: 'user' as const, parts: [{ text: cleanMessage }] },
+      ];
 
       const modelName = aiSettings.model === 'gemini-3.1-flash-lite' ? 'gemini-3.1-flash-lite' : 'gemini-4-hydrogen';
 
       const response = await generateWithRetry(modelName, {
-        contents: { parts: [{ text: promptText }] },
+        contents: multiTurnContents,
         config: {
           systemInstruction,
+          ...(modelName === 'gemini-4-hydrogen'
+            ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+            : {}),
         },
       });
 
@@ -1935,7 +1918,7 @@ async function startServer() {
 
       res.json({
         reply: response.text || 'I could not generate a response. Please rephrase your question.',
-        matchedResources: scoredResources,
+        matchedResources: wantsResources ? scoredResources : [],
         model: modelName,
         quotaRemaining: Math.max(0, limit - (currentCount + 1)),
       });
@@ -2376,72 +2359,102 @@ async function startServer() {
     res.json({ ok: true });
   });
 
-  // Safe Public Leaderboard & Like/Applaud (Strictly ZERO Chat or PII)
-  app.get('/api/leaderboard', (req: Request, res: Response) => {
+  // Safe Public Leaderboard & Like/Applaud (Strictly Real Students, ZERO Fake/Dummy Profiles or PII)
+  app.get('/api/leaderboard', async (req: Request, res: Response) => {
     const stuUser = resolveStudentCookie(req);
     const viewerId = stuUser?.uid || `guest_${hashPhoneKey(req.ip || 'anon').slice(0, 16)}`;
     const store = loadStudentStore();
     const overrides = loadContentOverrides();
     const profileLikes = overrides.profileLikes || {};
 
-    const realProfiles = Object.values(store)
-      .filter((s) => s.accountStatus !== 'suspended')
-      .map((rec) => {
+    const realProfileMap = new Map<string, ReturnType<typeof sanitizeStudentProfile> & {
+      completedLessonsCount: number;
+      quizScoreTotal: number;
+      likedByMe: boolean;
+    }>();
+
+    Object.values(store)
+      .filter((s) => s.accountStatus !== 'suspended' && !s.uid.startsWith('scholar_'))
+      .forEach((rec) => {
         const likers = profileLikes[rec.uid] || [];
         const sanitized = sanitizeStudentProfile(rec, likers.length);
         const completedLessonsCount = (rec.progressList || []).filter((p) => Boolean(p.completed)).length;
         const quizScoreTotal = (rec.quizAttempts || []).reduce((acc, a) => acc + Number(a.score || 0), 0);
-        return {
-          uid: sanitized.uid,
-          studentId: sanitized.studentId,
-          fullName: sanitized.fullName,
-          classId: sanitized.classId,
-          streakDays: sanitized.streakDays,
-          xp: sanitized.xp,
+        realProfileMap.set(sanitized.uid, {
+          ...sanitized,
           completedLessonsCount,
           quizScoreTotal,
-          likesCount: sanitized.likesCount,
           likedByMe: likers.includes(viewerId),
-          badges: sanitized.badges,
-          trophies: sanitized.trophies,
-          activeBorder: sanitized.activeBorder,
-          unlockedBorders: sanitized.unlockedBorders,
-        };
+        });
       });
 
-    const showcaseProfiles = SHOWCASE_LEADERBOARD_SCHOLARS.map((sc) => {
-      const likers = profileLikes[sc.uid] || [];
-      const g = computeGamification(
-        sc.completedLessonsCount,
-        sc.quizScoreTotal,
-        sc.streakDays,
-        sc.xp,
-        sc.baseLikes + likers.length,
-        sc.activeBorder
-      );
-      return {
-        uid: sc.uid,
-        studentId: sc.studentId,
-        fullName: sc.fullName,
-        classId: sc.classId,
-        streakDays: sc.streakDays,
-        xp: g.xp,
-        completedLessonsCount: sc.completedLessonsCount,
-        quizScoreTotal: sc.quizScoreTotal,
-        likesCount: sc.baseLikes + likers.length,
-        likedByMe: likers.includes(viewerId),
-        badges: g.badges,
-        trophies: g.trophies,
-        activeBorder: g.activeBorder,
-        unlockedBorders: g.unlockedBorders,
-      };
-    });
+    // Best-effort merge of real Firestore-registered students not in local file store
+    try {
+      const snap = await adminDb.collection('users').where('role', '==', 'student').limit(150).get();
+      snap.forEach((docSnap) => {
+        const data = docSnap.data() as Record<string, unknown>;
+        const uid = String(data.uid || docSnap.id);
+        if (!uid || uid.startsWith('scholar_') || data.accountStatus === 'suspended' || realProfileMap.has(uid)) {
+          return;
+        }
+        const likers = profileLikes[uid] || [];
+        const streakDays = Number(data.streakDays ?? 1);
+        const xp = Number(data.xp ?? 50);
+        const likesCount = Math.max(Number(data.likesCount ?? 0), likers.length);
+        const g = computeGamification(0, 0, streakDays, xp, likesCount, String(data.activeBorder || 'navy_classic'));
+        realProfileMap.set(uid, {
+          uid,
+          studentId: String(data.studentId || uid),
+          fullName: String(data.fullName || 'Student'),
+          classId: String(data.classId || 'class-9'),
+          preferredLanguage: data.preferredLanguage === 'en' ? 'en' : 'bn',
+          preferredTheme: data.preferredTheme === 'dark' ? 'dark' : 'light',
+          role: 'student',
+          accountStatus: 'active',
+          dailyGoalMinutes: Number(data.dailyGoalMinutes ?? 45),
+          streakDays,
+          lastActiveDate: String(data.lastActiveDate || getDhakaDateStr(0)),
+          streakHistory: Array.isArray(data.streakHistory) ? (data.streakHistory as string[]) : [],
+          xp: g.xp,
+          likesCount,
+          likedByMe: likers.includes(viewerId),
+          badges: Array.isArray(data.badges) ? (data.badges as string[]) : g.badges,
+          trophies: Array.isArray(data.trophies) ? (data.trophies as string[]) : g.trophies,
+          unlockedBorders: Array.isArray(data.unlockedBorders) ? (data.unlockedBorders as string[]) : g.unlockedBorders,
+          activeBorder: String(data.activeBorder || g.activeBorder),
+          completedLessonsCount: 0,
+          quizScoreTotal: 0,
+          createdAt: String(data.createdAt || ''),
+          updatedAt: String(data.updatedAt || ''),
+        });
+      });
+    } catch {
+      // Best-effort Firestore merge when Admin SDK credentials are active
+    }
 
-    const leaderboard = [...realProfiles, ...showcaseProfiles].sort((a, b) => b.xp - a.xp || b.streakDays - a.streakDays);
+    const leaderboard = Array.from(realProfileMap.values())
+      .map((item) => ({
+        uid: item.uid,
+        studentId: item.studentId,
+        fullName: item.fullName,
+        classId: item.classId,
+        streakDays: item.streakDays,
+        xp: item.xp,
+        completedLessonsCount: item.completedLessonsCount,
+        quizScoreTotal: item.quizScoreTotal,
+        likesCount: item.likesCount,
+        likedByMe: item.likedByMe,
+        badges: item.badges,
+        trophies: item.trophies,
+        activeBorder: item.activeBorder,
+        unlockedBorders: item.unlockedBorders,
+      }))
+      .sort((a, b) => b.xp - a.xp || b.streakDays - a.streakDays);
+
     res.json({ leaderboard });
   });
 
-  app.post('/api/students/:uid/like', (req: Request, res: Response) => {
+  app.post('/api/students/:uid/like', async (req: Request, res: Response) => {
     const targetUid = String(req.params.uid || '').trim();
     if (!targetUid) {
       res.status(400).json({ error: 'Target profile ID required.' });
@@ -2451,8 +2464,16 @@ async function startServer() {
     const viewerId = stuUser?.uid || `guest_${hashPhoneKey(req.ip || 'anon').slice(0, 16)}`;
 
     const store = loadStudentStore();
-    const showcase = SHOWCASE_LEADERBOARD_SCHOLARS.find((s) => s.uid === targetUid);
-    if (!store[targetUid] && !showcase) {
+    let existsInFirestore = false;
+    if (!store[targetUid]) {
+      try {
+        const snap = await adminDb.collection('users').doc(targetUid).get();
+        existsInFirestore = snap.exists && snap.data()?.role === 'student';
+      } catch {
+        existsInFirestore = false;
+      }
+    }
+    if (!store[targetUid] && !existsInFirestore) {
       res.status(404).json({ error: 'Student profile not found.' });
       return;
     }
@@ -2465,11 +2486,10 @@ async function startServer() {
     overrides.profileLikes[targetUid] = nextList;
     saveContentOverrides(overrides);
 
-    const baseCount = showcase ? showcase.baseLikes : 0;
     res.json({
       ok: true,
       uid: targetUid,
-      likesCount: baseCount + nextList.length,
+      likesCount: nextList.length,
       likedByMe: !alreadyLiked,
     });
   });
@@ -2902,12 +2922,19 @@ async function startServer() {
           downloadable: item.downloadable !== false,
         };
       } else if (colName === 'announcements') {
+        const rawLevel = String(item.noticeLevel || '').trim();
+        const noticeLevel = rawLevel === 'emergency' || rawLevel === 'warning' ? rawLevel : 'info';
+        const imageUrl = String(item.imageUrl || '').trim().slice(0, 1000);
+        const videoUrl = String(item.videoUrl || '').trim().slice(0, 1000);
         normalizedItem = {
           announcementId: id,
           title: String(item.title || '').trim(),
           titleBn: String(item.titleBn || '').trim() || String(item.title || '').trim(),
           content: String(item.content || '').trim(),
           contentBn: String(item.contentBn || '').trim() || String(item.content || '').trim(),
+          noticeLevel,
+          ...(imageUrl ? { imageUrl } : {}),
+          ...(videoUrl ? { videoUrl } : {}),
           targetClasses: Array.isArray(item.targetClasses) ? item.targetClasses.slice(0, 10) : ['all'],
           published: item.published !== false,
         };
@@ -3076,13 +3103,49 @@ async function startServer() {
 
   app.get('/api/admin/students-list', requireAdmin, async (_req: AuthenticatedRequest, res: Response) => {
     const store = loadStudentStore();
-    const localStudents = Object.values(store).map((s) => ({
-      ...sanitizeStudentProfile(s),
-      completedLessonsCount: (s.progressList || []).filter((p) => p.completed).length,
-      quizAttemptsCount: (s.quizAttempts || []).length,
-    }));
     const overrides = loadContentOverrides();
-    res.json({ students: localStudents, logs: overrides.activityLogs || [] });
+    const profileLikes = overrides.profileLikes || {};
+    const mergedMap = new Map<string, Record<string, unknown>>();
+
+    Object.values(store).forEach((s) => {
+      const likesCount = (profileLikes[s.uid] || []).length;
+      mergedMap.set(s.uid, {
+        ...sanitizeStudentProfile(s, likesCount),
+        completedLessonsCount: (s.progressList || []).filter((p) => p.completed).length,
+        quizAttemptsCount: (s.quizAttempts || []).length,
+      });
+    });
+
+    try {
+      const snap = await adminDb.collection('users').where('role', '==', 'student').limit(200).get();
+      snap.forEach((docSnap) => {
+        const d = docSnap.data() as Record<string, unknown>;
+        const uid = String(d.uid || docSnap.id);
+        if (!uid || mergedMap.has(uid)) return;
+        const likesCount = Math.max(Number(d.likesCount ?? 0), (profileLikes[uid] || []).length);
+        mergedMap.set(uid, {
+          uid,
+          studentId: String(d.studentId || uid),
+          fullName: String(d.fullName || 'Student'),
+          classId: String(d.classId || 'class-9'),
+          preferredLanguage: d.preferredLanguage === 'en' ? 'en' : 'bn',
+          role: 'student',
+          accountStatus: d.accountStatus === 'suspended' ? 'suspended' : 'active',
+          streakDays: Number(d.streakDays ?? 1),
+          xp: Number(d.xp ?? 50),
+          likesCount,
+          completedLessonsCount: 0,
+          quizAttemptsCount: 0,
+        });
+      });
+    } catch {
+      // Best-effort Firestore merge
+    }
+
+    const students = Array.from(mergedMap.values()).sort(
+      (a, b) => Number(b.xp || 0) - Number(a.xp || 0) || Number(b.streakDays || 0) - Number(a.streakDays || 0)
+    );
+    res.json({ students, logs: overrides.activityLogs || [] });
   });
 
   app.post('/api/admin/students/password-only', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
@@ -3135,18 +3198,122 @@ async function startServer() {
     }
   });
 
-  app.post('/api/admin/students/:uid/toggle-status', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
+  app.post('/api/admin/students/:uid/toggle-status', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+    const uid = String(req.params.uid || '').trim();
     const store = loadStudentStore();
-    const rec = store[req.params.uid];
-    if (!rec) {
-      res.status(404).json({ error: 'Student profile not found.' });
+    const rec = store[uid];
+    if (rec) {
+      rec.accountStatus = rec.accountStatus === 'suspended' ? 'active' : 'suspended';
+      rec.updatedAt = new Date().toISOString();
+      saveStudentStore(store);
+      try {
+        await adminDb.collection('users').doc(uid).set(
+          { accountStatus: rec.accountStatus, updatedAt: FieldValue.serverTimestamp() },
+          { merge: true }
+        );
+      } catch {
+        // best-effort Firestore sync
+      }
+      res.json({ ok: true, accountStatus: rec.accountStatus });
       return;
     }
-    rec.accountStatus = rec.accountStatus === 'suspended' ? 'active' : 'suspended';
-    rec.updatedAt = new Date().toISOString();
-    saveStudentStore(store);
-    res.json({ ok: true, accountStatus: rec.accountStatus });
+
+    try {
+      const snap = await adminDb.collection('users').doc(uid).get();
+      if (!snap.exists) {
+        res.status(404).json({ error: 'Student profile not found.' });
+        return;
+      }
+      const nextStatus = snap.data()?.accountStatus === 'suspended' ? 'active' : 'suspended';
+      await adminDb.collection('users').doc(uid).update({
+        accountStatus: nextStatus,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      res.json({ ok: true, accountStatus: nextStatus });
+    } catch {
+      res.status(404).json({ error: 'Student profile not found.' });
+    }
   });
+
+  const handleAdminRemoveStudent = async (req: AuthenticatedRequest, res: Response) => {
+    const uid = String(req.params.uid || '').trim();
+    if (!uid) {
+      res.status(400).json({ error: 'Student UID is required.' });
+      return;
+    }
+
+    const store = loadStudentStore();
+    const removedLocal = store[uid];
+    let removedName = removedLocal?.fullName || uid;
+    let removedStudentId = removedLocal?.studentId || '';
+
+    if (removedLocal) {
+      delete store[uid];
+      saveStudentStore(store);
+    }
+
+    const overrides = loadContentOverrides();
+    if (overrides.profileLikes && overrides.profileLikes[uid]) {
+      delete overrides.profileLikes[uid];
+    }
+
+    let removedRemote = false;
+    try {
+      const userSnap = await adminDb.collection('users').doc(uid).get();
+      if (userSnap.exists) {
+        const d = userSnap.data() || {};
+        removedName = String(d.fullName || removedName);
+        removedStudentId = String(d.studentId || removedStudentId);
+        removedRemote = true;
+      }
+      await adminDb.collection('users').doc(uid).collection('private').doc('info').delete().catch(() => undefined);
+      await adminDb.collection('users').doc(uid).delete().catch(() => undefined);
+      await adminDb.collection('authSecrets').doc(uid).delete().catch(() => undefined);
+      if (removedStudentId) {
+        await adminDb.collection('studentIdIndex').doc(removedStudentId).delete().catch(() => undefined);
+      }
+      const studentOwnedCols = [
+        'studentProgress',
+        'bookmarks',
+        'studentNotes',
+        'quizAttempts',
+        'feedback',
+        'aiConversations',
+      ];
+      for (const colName of studentOwnedCols) {
+        const snap = await adminDb.collection(colName).where('studentId', '==', uid).limit(200).get().catch(() => null);
+        if (snap && !snap.empty) {
+          const batch = adminDb.batch();
+          snap.docs.forEach((docSnap) => batch.delete(docSnap.ref));
+          await batch.commit().catch(() => undefined);
+        }
+      }
+    } catch {
+      // Best-effort Firestore Admin cleanup
+    }
+
+    overrides.activityLogs = overrides.activityLogs || [];
+    overrides.activityLogs.unshift({
+      logId: `log_${Date.now()}`,
+      actorUid: req.authUser?.uid || 'admin-primary',
+      actorName: req.authUser?.name || 'Admin Portal',
+      action: 'REMOVED_STUDENT',
+      target: `${removedName} (${removedStudentId || uid})`,
+      timestamp: new Date().toISOString(),
+    });
+    overrides.activityLogs = overrides.activityLogs.slice(0, 80);
+    saveContentOverrides(overrides);
+
+    if (!removedLocal && !removedRemote) {
+      // Still return ok so client Firestore deletion can finalize if record only lived client-side
+      res.json({ ok: true, uid, removedFrom: 'none' });
+      return;
+    }
+    res.json({ ok: true, uid, removedFrom: removedLocal ? 'local' : 'firestore' });
+  };
+
+  app.post('/api/admin/students/:uid/remove', requireAdmin, handleAdminRemoveStudent);
+  app.delete('/api/admin/students/:uid', requireAdmin, handleAdminRemoveStudent);
 
   // Admin AI Auto-Fill Lesson + Quiz Generator
   app.post('/api/admin/ai/autofill-lesson', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
@@ -3370,6 +3537,49 @@ Include bilingual English & natural Unicode Bangla titles/descriptions for 1 cha
     const vite = await createViteServer({
       server: { middlewareMode: true, hmr: false, ws: false },
       appType: 'spa',
+    });
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      if (req.path === '/@vite/client') {
+        delete req.headers['if-none-match'];
+        const origWrite = res.write.bind(res);
+        const origEnd = res.end.bind(res);
+        const chunks: Buffer[] = [];
+        res.write = ((chunk: unknown) => {
+          if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+          return true;
+        }) as Response['write'];
+        res.end = ((chunk?: unknown, ...rest: unknown[]) => {
+          if (chunk && typeof chunk !== 'function') {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+          }
+          if (chunks.length > 0) {
+            const raw = Buffer.concat(chunks).toString('utf-8');
+            const patched = raw
+              .replace(
+                'transport.connect(createHMRHandler(handleMessage));',
+                '/* HMR disabled */ void 0;'
+              )
+              .replace(
+                'wsTransport.send(data);',
+                '/* HMR disabled */ void data;'
+              )
+              .replace(
+                'else throw new SendBeforeConnectError("send was called before connect");',
+                'else return;'
+              )
+              .replace(
+                'else throw new SendBeforeConnectError("invoke was called before connect");',
+                'else return;'
+              );
+            res.removeHeader('Content-Length');
+            res.removeHeader('ETag');
+            origWrite(patched);
+          }
+          const cb = typeof chunk === 'function' ? chunk : rest.find((a) => typeof a === 'function');
+          return cb ? origEnd(cb as () => void) : origEnd();
+        }) as Response['end'];
+      }
+      next();
     });
     app.use(vite.middlewares);
   } else {

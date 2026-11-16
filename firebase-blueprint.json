@@ -327,7 +327,7 @@
     },
     "Announcement": {
       "title": "Announcement",
-      "description": "Admin announcements targeted to classes.",
+      "description": "Admin announcements, emergency notices, warning signs, and media links targeted to classes.",
       "type": "object",
       "properties": {
         "announcementId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
@@ -335,6 +335,9 @@
         "titleBn": { "type": "string", "maxLength": 200 },
         "content": { "type": "string", "minLength": 1, "maxLength": 2000 },
         "contentBn": { "type": "string", "maxLength": 2000 },
+        "noticeLevel": { "type": "string", "enum": ["info", "warning", "emergency"] },
+        "imageUrl": { "type": "string", "maxLength": 1000 },
+        "videoUrl": { "type": "string", "maxLength": 1000 },
         "targetClasses": { "type": "array" },
         "published": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" }

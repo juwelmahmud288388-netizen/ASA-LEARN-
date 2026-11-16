@@ -3,6 +3,7 @@ import { Globe, Menu, Moon, Sun, X } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { t } from '../i18n/translations';
 import { BRAND_LOGO_PATH, getLogoContrastClass } from '../lib/utils';
+import { PWAInstallButton } from './PWAInstallButton';
 
 export const Navbar: React.FC = () => {
   const { language, setLanguage, theme, toggleTheme, userProfile, isAdmin, appSettings, route, navigate, openStudentModal } = useApp();
@@ -84,6 +85,8 @@ export const Navbar: React.FC = () => {
             {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </button>
 
+          <PWAInstallButton compact className="hidden sm:inline-flex" />
+
           <button
             type="button"
             onClick={() => (userProfile ? handleLink('/dashboard') : openStudentModal('create'))}
@@ -161,6 +164,9 @@ export const Navbar: React.FC = () => {
                 {theme === 'dark' ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
                 <span>{theme === 'dark' ? 'Light' : 'Dark'}</span>
               </button>
+            </div>
+            <div className="pt-2">
+              <PWAInstallButton className="w-full justify-center py-2.5" />
             </div>
           </div>
         </div>

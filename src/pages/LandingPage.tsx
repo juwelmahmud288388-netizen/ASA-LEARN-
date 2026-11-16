@@ -1,24 +1,30 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  AlertOctagon,
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   BookOpen,
   Bot,
+  ChevronLeft,
   ChevronRight,
+  ExternalLink,
   Flame,
   Layers,
+  Megaphone,
   Play,
   Search,
   Sparkles,
   Trophy,
+  Video,
   X,
   Zap,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { t } from '../i18n/translations';
 import { getClassMeta, getSubjectVisual, GROUP_OPTIONS } from '../lib/subjectIcons';
-import { getYouTubeThumbnail, HERO_WORKSPACE_IMAGE } from '../lib/utils';
-import type { SubjectGroup } from '../types';
+import { extractYouTubeId, getYouTubeEmbedUrl, getYouTubeThumbnail, HERO_WORKSPACE_IMAGE } from '../lib/utils';
+import type { Announcement, SubjectGroup } from '../types';
 
 const ONBOARDING_STORAGE_KEY = 'asa_onboarding_done';
 
@@ -33,6 +39,7 @@ export const LandingPage: React.FC = () => {
     subjects,
     chapters,
     lessons,
+    announcements,
     navigate,
     openAiWithLesson,
     openStudentModal,
@@ -42,6 +49,9 @@ export const LandingPage: React.FC = () => {
   const [showClassPopup, setShowClassPopup] = useState(false);
   const [popupClassId, setPopupClassId] = useState<string | null>(null);
   const [popupFilter, setPopupFilter] = useState<'all' | 'compulsory' | 'optional' | Exclude<SubjectGroup, 'common'>>('all');
+  const [dismissedNoticeIds, setDismissedNoticeIds] = useState<string[]>([]);
+  const [expandedVideoNoticeId, setExpandedVideoNoticeId] = useState<string | null>(null);
+  const [infoNoticeIndex, setInfoNoticeIndex] = useState(0);
 
   useEffect(() => {
     if (showLanguageModal) return;
@@ -152,6 +162,57 @@ export const LandingPage: React.FC = () => {
   const studentBadgesCount = userProfile?.badges?.length || 0;
   const studentTrophiesCount = userProfile?.trophies?.length || 0;
 
+  const publishedNotices = useMemo(() => {
+    const levelWeight = (lvl?: Announcement['noticeLevel']) =>
+      lvl === 'emergency' ? 3 : lvl === 'warning' ? 2 : 1;
+    const toTime = (val: unknown): number => {
+      if (!val) return 0;
+      if (typeof val === 'string' || typeof val === 'number') return new Date(val).getTime() || 0;
+      if (typeof val === 'object' && val !== null && 'toDate' in val && typeof (val as { toDate: () => Date }).toDate === 'function') {
+        return (val as { toDate: () => Date }).toDate().getTime() || 0;
+      }
+      if (typeof val === 'object' && val !== null && '_seconds' in val) {
+        return ((val as { _seconds: number })._seconds || 0) * 1000;
+      }
+      return 0;
+    };
+
+    return announcements
+      .filter((a) => a.published !== false && !dismissedNoticeIds.includes(a.announcementId))
+      .sort((a, b) => {
+        const wDiff = levelWeight(b.noticeLevel) - levelWeight(a.noticeLevel);
+        if (wDiff !== 0) return wDiff;
+        return toTime(b.createdAt) - toTime(a.createdAt);
+      });
+  }, [announcements, dismissedNoticeIds]);
+
+  const priorityNotices = useMemo(
+    () =>
+      publishedNotices.filter(
+        (a) =>
+          a.noticeLevel === 'emergency' ||
+          a.noticeLevel === 'warning' ||
+          Boolean(a.imageUrl?.trim()) ||
+          Boolean(a.videoUrl?.trim())
+      ),
+    [publishedNotices]
+  );
+
+  const standardNotices = useMemo(
+    () =>
+      publishedNotices.filter(
+        (a) =>
+          a.noticeLevel !== 'emergency' &&
+          a.noticeLevel !== 'warning' &&
+          !a.imageUrl?.trim() &&
+          !a.videoUrl?.trim()
+      ),
+    [publishedNotices]
+  );
+
+  const activeInfoNotice =
+    standardNotices.length > 0 ? standardNotices[infoNoticeIndex % standardNotices.length] : null;
+
   return (
     <div className="mx-auto max-w-[1280px] px-4 pb-12 sm:px-6 lg:px-8">
       {/* Subtle Single-Line Announcement */}
@@ -160,6 +221,200 @@ export const LandingPage: React.FC = () => {
           {language === 'bn'
             ? appSettings.homepageSettings.announcementBannerBn
             : appSettings.homepageSettings.announcementBannerEn}
+        </div>
+      )}
+
+      {/* Firebase-Connected Emergency / Warning / Media Notice Banners */}
+      {priorityNotices.length > 0 && (
+        <section aria-label="Important Notices" className="mt-4 space-y-3">
+          {priorityNotices.map((notice) => {
+            const isEmergency = notice.noticeLevel === 'emergency';
+            const isWarning = notice.noticeLevel === 'warning';
+            const ytId = notice.videoUrl ? extractYouTubeId(notice.videoUrl) : null;
+            const embedUrl = notice.videoUrl && ytId ? getYouTubeEmbedUrl(notice.videoUrl) : '';
+            const isVideoExpanded = expandedVideoNoticeId === notice.announcementId;
+            const isDirectVideoFile = Boolean(
+              notice.videoUrl && /\.(mp4|webm|ogg)(\?.*)?$/i.test(notice.videoUrl.trim())
+            );
+
+            const containerClass = isEmergency
+              ? 'border-red-500/40 bg-red-50/95 text-red-950 shadow-sm dark:border-red-500/35 dark:bg-red-950/55 dark:text-red-50'
+              : isWarning
+                ? 'border-amber-500/40 bg-amber-50/95 text-amber-950 shadow-sm dark:border-amber-500/35 dark:bg-amber-950/50 dark:text-amber-50'
+                : 'border-[#263B91]/25 bg-white/90 text-[#172033] shadow-sm dark:border-[#BFE8FF]/20 dark:bg-slate-900/85 dark:text-slate-100';
+
+            const badgeClass = isEmergency
+              ? 'bg-red-600 text-white'
+              : isWarning
+                ? 'bg-amber-500 text-slate-950'
+                : 'bg-[#172554] text-white dark:bg-[#BFE8FF] dark:text-[#172554]';
+
+            const badgeLabel = isEmergency
+              ? language === 'bn'
+                ? 'জরুরি নোটিশ'
+                : 'EMERGENCY NOTICE'
+              : isWarning
+                ? language === 'bn'
+                  ? 'সতর্কীকরণ'
+                  : 'WARNING SIGN'
+                : language === 'bn'
+                  ? 'নোটিশ বোর্ড'
+                  : 'NOTICE';
+
+            const IconComponent = isEmergency ? AlertOctagon : isWarning ? AlertTriangle : Megaphone;
+
+            return (
+              <div
+                key={notice.announcementId}
+                className={`rounded-3xl border p-4 backdrop-blur-md transition sm:p-5 ${containerClass}`}
+              >
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div className="flex flex-1 items-start gap-3">
+                    <div
+                      className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${badgeClass}`}
+                    >
+                      <IconComponent className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`inline-flex items-center rounded-lg px-2 py-0.5 text-[10px] font-extrabold tracking-wide uppercase ${badgeClass}`}>
+                          {badgeLabel}
+                        </span>
+                        <h2 className="font-display text-sm font-extrabold sm:text-base">
+                          {language === 'bn' ? notice.titleBn || notice.title : notice.title}
+                        </h2>
+                      </div>
+                      <p className="mt-1.5 text-xs leading-relaxed opacity-90 sm:text-sm">
+                        {language === 'bn' ? notice.contentBn || notice.content : notice.content}
+                      </p>
+
+                      {notice.videoUrl && (
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          {(embedUrl || isDirectVideoFile) && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExpandedVideoNoticeId(isVideoExpanded ? null : notice.announcementId)
+                              }
+                              className="inline-flex items-center gap-1.5 rounded-xl bg-[#172554] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#263B91] dark:bg-[#BFE8FF] dark:text-[#172554]"
+                            >
+                              <Video className="h-3.5 w-3.5" />
+                              <span>
+                                {isVideoExpanded
+                                  ? language === 'bn'
+                                    ? 'ভিডিও বন্ধ করুন'
+                                    : 'Hide Video'
+                                  : language === 'bn'
+                                    ? 'নোটিশ ভিডিও দেখুন'
+                                    : 'Watch Notice Video'}
+                              </span>
+                            </button>
+                          )}
+                          <a
+                            href={notice.videoUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 rounded-xl border border-current/20 px-3 py-1.5 text-xs font-semibold transition hover:bg-black/5 dark:hover:bg-white/10"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                            <span>{language === 'bn' ? 'ভিডিও লিংক খুলুন' : 'Open Video Link'}</span>
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-start justify-between gap-3 md:justify-end">
+                    {notice.imageUrl && (
+                      <a
+                        href={notice.imageUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block overflow-hidden rounded-2xl border border-black/10 shadow-xs dark:border-white/15"
+                      >
+                        <img
+                          src={notice.imageUrl}
+                          alt={language === 'bn' ? notice.titleBn || notice.title : notice.title}
+                          className="h-32 w-full object-cover sm:w-52"
+                        />
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDismissedNoticeIds((prev) => [...prev, notice.announcementId])
+                      }
+                      aria-label="Dismiss notice"
+                      className="rounded-xl p-1.5 opacity-65 transition hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {isVideoExpanded && notice.videoUrl && (
+                  <div className="mt-4 overflow-hidden rounded-2xl border border-black/10 bg-black dark:border-white/15">
+                    {embedUrl ? (
+                      <div className="aspect-video w-full">
+                        <iframe
+                          src={embedUrl}
+                          title={notice.title}
+                          referrerPolicy="strict-origin-when-cross-origin"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                          allowFullScreen
+                          className="h-full w-full"
+                        />
+                      </div>
+                    ) : isDirectVideoFile ? (
+                      <video controls src={notice.videoUrl} className="max-h-80 w-full" />
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </section>
+      )}
+
+      {/* Compact Standard Notice Strip (Firebase-synced normal notices) */}
+      {activeInfoNotice && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#172554]/12 bg-white/80 px-4 py-2.5 text-xs backdrop-blur-md dark:border-white/12 dark:bg-slate-900/75">
+          <div className="flex min-w-0 flex-1 items-center gap-2.5">
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-[#172554] px-2 py-0.5 text-[10px] font-bold text-white dark:bg-[#BFE8FF] dark:text-[#172554]">
+              <Megaphone className="h-3 w-3" />
+              <span>{language === 'bn' ? 'নোটিশ' : 'NOTICE'}</span>
+            </span>
+            <p className="truncate font-semibold text-[#172033] dark:text-white">
+              {language === 'bn'
+                ? `${activeInfoNotice.titleBn || activeInfoNotice.title}: ${activeInfoNotice.contentBn || activeInfoNotice.content}`
+                : `${activeInfoNotice.title}: ${activeInfoNotice.content}`}
+            </p>
+          </div>
+          {standardNotices.length > 1 && (
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                onClick={() =>
+                  setInfoNoticeIndex((prev) => (prev - 1 + standardNotices.length) % standardNotices.length)
+                }
+                aria-label="Previous notice"
+                className="rounded-lg p-1 text-[#172554] hover:bg-[#E7F5FF] dark:text-[#BFE8FF] dark:hover:bg-slate-800"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </button>
+              <span className="font-mono-nums text-[10px] text-[#64748B]">
+                {(infoNoticeIndex % standardNotices.length) + 1}/{standardNotices.length}
+              </span>
+              <button
+                type="button"
+                onClick={() => setInfoNoticeIndex((prev) => (prev + 1) % standardNotices.length)}
+                aria-label="Next notice"
+                className="rounded-lg p-1 text-[#172554] hover:bg-[#E7F5FF] dark:text-[#BFE8FF] dark:hover:bg-slate-800"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       )}
 

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   AlertCircle,
+  AlertTriangle,
   BarChart3,
   BookOpen,
   Check,
@@ -13,10 +14,13 @@ import {
   Eye,
   EyeOff,
   FileText,
+  Flame,
   FolderPlus,
+  Image,
   KeyRound,
   Lock,
   LogOut,
+  Megaphone,
   Palette,
   Pencil,
   Phone,
@@ -27,15 +31,19 @@ import {
   Trash2,
   UserPlus,
   Users,
+  UserX,
   Video,
   Wand2,
   X,
   Youtube,
 } from 'lucide-react';
+import { collection, doc, getDocs, query, where, writeBatch } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { GROUP_OPTIONS } from '../lib/subjectIcons';
 import {
   localAddAdmin,
   localAdminListStudents,
+  localAdminRemoveStudent,
   localAdminToggleStudentStatus,
   localClearAllDemos,
   localCreateStudentProfile,
@@ -57,6 +65,7 @@ import type {
   DifficultyLevel,
   LessonCategory,
   LessonItem,
+  NoticeLevel,
   PublishStatus,
   ResourceItem,
   SubjectGroup,
@@ -150,6 +159,8 @@ export const AdminDashboard: React.FC = () => {
   const [newStuClass, setNewStuClass] = useState('class-9');
   const [newStuPass, setNewStuPass] = useState('');
   const [newStuLang, setNewStuLang] = useState<'bn' | 'en'>('bn');
+  const [confirmKickUid, setConfirmKickUid] = useState<string | null>(null);
+  const [removingStudentUid, setRemovingStudentUid] = useState<string | null>(null);
 
   // Curriculum creation & editing
   const [entityType, setEntityType] = useState<CurriculumEntity>('subject');
@@ -158,6 +169,9 @@ export const AdminDashboard: React.FC = () => {
   const [entTitleBn, setEntTitleBn] = useState('');
   const [entDesc, setEntDesc] = useState('');
   const [entDescBn, setEntDescBn] = useState('');
+  const [entNoticeLevel, setEntNoticeLevel] = useState<NoticeLevel>('info');
+  const [entImageUrl, setEntImageUrl] = useState('');
+  const [entVideoUrl, setEntVideoUrl] = useState('');
   const [entIcon, setEntIcon] = useState('layers');
   const [entClassId, setEntClassId] = useState('class-9');
   const [entSubjectId, setEntSubjectId] = useState('');
@@ -288,14 +302,49 @@ export const AdminDashboard: React.FC = () => {
         setHealthInfo({ ok: true, geminiConfigured: false });
       }
 
+      let mergedStudents: AdminStudentRow[] = [];
       if (studentsRes.ok && studentsRes.data) {
-        if (Array.isArray(studentsRes.data.students)) setStudents(studentsRes.data.students);
+        if (Array.isArray(studentsRes.data.students)) mergedStudents = studentsRes.data.students;
         if (Array.isArray(studentsRes.data.logs)) setLogs(studentsRes.data.logs);
       } else if (shouldFallbackToLocal(studentsRes)) {
         const localStu = localAdminListStudents();
-        setStudents(localStu.students);
+        mergedStudents = localStu.students;
         setLogs(localStu.logs);
       }
+
+      if (hasFirestoreAdminAuth) {
+        try {
+          const snap = await getDocs(query(collection(db, 'users'), where('role', '==', 'student')));
+          const byUid = new Map(mergedStudents.map((s) => [s.uid, s]));
+          snap.forEach((docSnap) => {
+            const d = docSnap.data() as Record<string, unknown>;
+            const uid = String(d.uid || docSnap.id);
+            if (!uid || byUid.has(uid)) return;
+            byUid.set(uid, {
+              uid,
+              studentId: String(d.studentId || uid),
+              fullName: String(d.fullName || 'Student'),
+              classId: String(d.classId || 'class-9'),
+              preferredLanguage: d.preferredLanguage === 'en' ? 'en' : 'bn',
+              role: 'student',
+              accountStatus: d.accountStatus === 'suspended' ? 'suspended' : 'active',
+              streakDays: Number(d.streakDays ?? 1),
+              xp: Number(d.xp ?? 50),
+              likesCount: Number(d.likesCount ?? 0),
+              completedLessonsCount: 0,
+              quizAttemptsCount: 0,
+              createdAt: String(d.createdAt || ''),
+              updatedAt: String(d.updatedAt || ''),
+            });
+          });
+          mergedStudents = Array.from(byUid.values()).sort(
+            (a, b) => Number(b.xp || 0) - Number(a.xp || 0) || Number(b.streakDays || 0) - Number(a.streakDays || 0)
+          );
+        } catch {
+          // Non-blocking Firestore student read
+        }
+      }
+      setStudents(mergedStudents);
 
       if (adminsRes.ok && adminsRes.data && Array.isArray(adminsRes.data.admins)) {
         setAdminAccounts(adminsRes.data.admins);
@@ -308,7 +357,7 @@ export const AdminDashboard: React.FC = () => {
       setLogs(localStu.logs);
       setAdminAccounts(localListAdmins());
     }
-  }, [isAdmin]);
+  }, [isAdmin, hasFirestoreAdminAuth]);
 
   useEffect(() => {
     void loadAdminExtras();
@@ -873,6 +922,9 @@ export const AdminDashboard: React.FC = () => {
     setEntTitleBn('');
     setEntDesc('');
     setEntDescBn('');
+    setEntNoticeLevel('info');
+    setEntImageUrl('');
+    setEntVideoUrl('');
     setEntIsOptional(false);
     setEntGroups(['common']);
     setEntOrder(1);
@@ -909,6 +961,10 @@ export const AdminDashboard: React.FC = () => {
       setEntTitleBn(String(item.titleBn || ''));
       setEntDesc(String(item.content || ''));
       setEntDescBn(String(item.contentBn || ''));
+      const rawLevel = String(item.noticeLevel || '').trim();
+      setEntNoticeLevel(rawLevel === 'emergency' || rawLevel === 'warning' ? rawLevel : 'info');
+      setEntImageUrl(String(item.imageUrl || ''));
+      setEntVideoUrl(String(item.videoUrl || ''));
     } else if (type === 'category') {
       setEditingEntityId(String(item.categoryId));
       setEntTitle(String(item.title || ''));
@@ -996,6 +1052,9 @@ export const AdminDashboard: React.FC = () => {
           titleBn: entTitleBn.trim() || entTitle.trim(),
           content: entDesc.trim() || entTitle.trim(),
           contentBn: entDescBn.trim() || entDesc.trim() || entTitle.trim(),
+          noticeLevel: entNoticeLevel,
+          ...(entImageUrl.trim() ? { imageUrl: entImageUrl.trim() } : {}),
+          ...(entVideoUrl.trim() ? { videoUrl: entVideoUrl.trim() } : {}),
           targetClasses: classes.map((c) => c.classId),
           published: true,
         });
@@ -1323,6 +1382,68 @@ export const AdminDashboard: React.FC = () => {
       void loadAdminExtras();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not update student status.');
+    }
+  };
+
+  const handleRemoveStudent = async (stu: AdminStudentRow) => {
+    setRemovingStudentUid(stu.uid);
+    try {
+      const res = await safeJsonFetch<{ ok?: boolean; error?: string }>(
+        `/api/admin/students/${encodeURIComponent(stu.uid)}/remove`,
+        {
+          method: 'POST',
+          headers: getAdminAuthHeaders(),
+          credentials: 'include',
+        }
+      );
+
+      if (!res.ok) {
+        if (shouldFallbackToLocal(res)) {
+          localAdminRemoveStudent(stu.uid);
+        } else {
+          throw new Error(res.errorMessage || 'Could not remove student account.');
+        }
+      }
+
+      if (hasFirestoreAdminAuth) {
+        await deleteItemFromFirestore(`users/${stu.uid}/private`, 'info');
+        await deleteItemFromFirestore('users', stu.uid);
+        const studentCols = [
+          'studentProgress',
+          'bookmarks',
+          'studentNotes',
+          'quizAttempts',
+          'feedback',
+          'aiConversations',
+        ];
+        for (const colName of studentCols) {
+          try {
+            const snap = await getDocs(query(collection(db, colName), where('studentId', '==', stu.uid)));
+            if (!snap.empty) {
+              const batch = writeBatch(db);
+              snap.docs.forEach((docSnap) => {
+                batch.delete(doc(db, colName, docSnap.id));
+              });
+              await batch.commit();
+            }
+          } catch {
+            // Non-blocking cleanup for sub-records
+          }
+        }
+      }
+
+      setStudents((prev) => prev.filter((item) => item.uid !== stu.uid));
+      setConfirmKickUid(null);
+      notify(
+        language === 'bn'
+          ? `${stu.fullName} (${stu.studentId}) কে Firebase থেকে স্থায়ীভাবে সরানো হয়েছে।`
+          : `Removed ${stu.fullName} (${stu.studentId}) from Firebase, students & leaderboard.`
+      );
+      void loadAdminExtras();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not remove student.');
+    } finally {
+      setRemovingStudentUid(null);
     }
   };
 
@@ -1656,6 +1777,14 @@ export const AdminDashboard: React.FC = () => {
                   </button>
                   <button
                     type="button"
+                    onClick={() => setTab('students')}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-[#172554]/15 bg-white px-3.5 py-2 text-xs font-semibold text-[#172554] hover:bg-[#E7F5FF] dark:border-white/15 dark:bg-slate-800 dark:text-[#BFE8FF]"
+                  >
+                    <Users className="h-3.5 w-3.5" />
+                    <span>{language === 'bn' ? 'শিক্ষার্থী ও XP' : 'Students & XP'}</span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setTab('admins')}
                     className="inline-flex items-center gap-1.5 rounded-xl border border-[#172554]/15 bg-white px-3.5 py-2 text-xs font-semibold text-[#172554] hover:bg-[#E7F5FF] dark:border-white/15 dark:bg-slate-800 dark:text-[#BFE8FF]"
                   >
@@ -1675,14 +1804,18 @@ export const AdminDashboard: React.FC = () => {
 
               {/* KPI Cards */}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-3xl bg-gradient-to-br from-[#172554] to-[#263B91] p-5 text-white shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => setTab('students')}
+                  className="rounded-3xl bg-gradient-to-br from-[#172554] to-[#263B91] p-5 text-left text-white shadow-lg transition hover:-translate-y-0.5"
+                >
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-medium text-[#BFE8FF]">Students</span>
                     <Users className="h-5 w-5 text-[#BFE8FF]" />
                   </div>
                   <p className="font-mono-nums mt-3 text-3xl font-bold">{students.length}</p>
                   <p className="mt-1 text-[11px] text-[#E7F5FF]/85">{activeStudentsCount} active profiles</p>
-                </div>
+                </button>
 
                 <div className="rounded-3xl bg-gradient-to-br from-sky-600 to-cyan-500 p-5 text-white shadow-lg">
                   <div className="flex items-center justify-between">
@@ -1836,7 +1969,23 @@ export const AdminDashboard: React.FC = () => {
                     {announcements.map((a) => (
                       <div key={a.announcementId} className="flex items-center justify-between gap-2 rounded-xl bg-white/75 px-3 py-2 dark:bg-slate-900/60">
                         <div className="min-w-0">
-                          <p className="truncate font-semibold text-[#172033] dark:text-white">{a.title}</p>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {a.noticeLevel === 'emergency' && (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-700 dark:bg-red-900/50 dark:text-red-200">
+                                <AlertTriangle className="h-2.5 w-2.5" />
+                                EMERGENCY
+                              </span>
+                            )}
+                            {a.noticeLevel === 'warning' && (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">
+                                <AlertTriangle className="h-2.5 w-2.5" />
+                                WARNING
+                              </span>
+                            )}
+                            <p className="truncate font-semibold text-[#172033] dark:text-white">{a.title}</p>
+                            {a.imageUrl && <Image className="h-3 w-3 shrink-0 text-[#263B91] dark:text-[#BFE8FF]" />}
+                            {a.videoUrl && <Video className="h-3 w-3 shrink-0 text-[#263B91] dark:text-[#BFE8FF]" />}
+                          </div>
                           <p className="truncate text-[11px] text-[#64748B]">{a.content}</p>
                         </div>
                         <div className="flex shrink-0 items-center gap-1">
@@ -1882,6 +2031,131 @@ export const AdminDashboard: React.FC = () => {
                     ))}
                     {logs.length === 0 && <p className="text-[#64748B]">No recent actions logged yet.</p>}
                   </div>
+                </div>
+              </div>
+
+              {/* Registered Students Tracker (XP, Streaks & Firebase Remove/Kick) */}
+              <div className="glass-surface rounded-3xl p-6">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-display text-base font-bold text-[#172033] dark:text-white">
+                      {language === 'bn'
+                        ? `নিবন্ধিত শিক্ষার্থী ট্র্যাকিং ও Firebase নিয়ন্ত্রণ (${students.length})`
+                        : `Registered Students — XP, Streaks & Firebase Control (${students.length})`}
+                    </h3>
+                    <p className="text-xs text-[#64748B] dark:text-slate-400">
+                      {language === 'bn'
+                        ? 'শিক্ষার্থীদের মোট XP, দৈনিক স্ট্রিক দেখুন এবং অবাঞ্ছিত অ্যাকাউন্ট সরাসরি Remove / Kick করুন'
+                        : 'Track student XP and daily streaks, or remove/kick specific student records from Firebase.'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void loadAdminExtras()}
+                      className="inline-flex items-center gap-1 rounded-xl border border-[#172554]/15 bg-white px-3 py-1.5 text-xs font-semibold text-[#172554] hover:bg-[#E7F5FF] dark:border-white/15 dark:bg-slate-800 dark:text-[#BFE8FF]"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      <span>{language === 'bn' ? 'রিফ্রেশ' : 'Refresh'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTab('students')}
+                      className="inline-flex items-center gap-1 rounded-xl bg-[#172554] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#263B91] dark:bg-[#BFE8FF] dark:text-[#172554]"
+                    >
+                      <Users className="h-3.5 w-3.5" />
+                      <span>{language === 'bn' ? 'সকল শিক্ষার্থী' : 'Open Students Tab'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-[#172554]/10 text-[#64748B] dark:border-white/10">
+                        <th className="py-2 pr-3">Student ID</th>
+                        <th className="py-2 pr-3">Name</th>
+                        <th className="py-2 pr-3">Class</th>
+                        <th className="py-2 pr-3">XP</th>
+                        <th className="py-2 pr-3">Streak</th>
+                        <th className="py-2 pr-3">Status</th>
+                        <th className="py-2">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {students.slice(0, 10).map((s) => (
+                        <tr key={s.uid} className="border-b border-[#172554]/5 dark:border-white/5">
+                          <td className="py-2.5 pr-3 font-mono-nums font-semibold text-[#172554] dark:text-[#BFE8FF]">
+                            {s.studentId}
+                          </td>
+                          <td className="py-2.5 pr-3 font-medium text-[#172033] dark:text-white">{s.fullName}</td>
+                          <td className="py-2.5 pr-3">{s.classId}</td>
+                          <td className="py-2.5 pr-3">
+                            <span className="inline-flex items-center rounded-md bg-[#E7F5FF] px-2 py-0.5 font-mono-nums text-[11px] font-bold text-[#172554] dark:bg-slate-800 dark:text-[#BFE8FF]">
+                              {s.xp ?? 0} XP
+                            </span>
+                          </td>
+                          <td className="py-2.5 pr-3">
+                            <span className="inline-flex items-center gap-1 font-mono-nums text-[11px] font-bold text-orange-600 dark:text-amber-300">
+                              <Flame className="h-3.5 w-3.5 fill-current" />
+                              {s.streakDays ?? 0}d
+                            </span>
+                          </td>
+                          <td className="py-2.5 pr-3">
+                            <span
+                              className={`inline-flex rounded-md px-2 py-0.5 text-[10px] font-bold uppercase ${
+                                s.accountStatus === 'suspended'
+                                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                                  : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                              }`}
+                            >
+                              {s.accountStatus}
+                            </span>
+                          </td>
+                          <td className="py-2.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {confirmKickUid === s.uid ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    disabled={removingStudentUid === s.uid}
+                                    onClick={() => void handleRemoveStudent(s)}
+                                    className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-red-700 disabled:opacity-50"
+                                  >
+                                    <UserX className="h-3 w-3" />
+                                    <span>{removingStudentUid === s.uid ? 'Removing...' : 'Confirm Kick'}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmKickUid(null)}
+                                    className="rounded-lg border border-[#172554]/15 px-2 py-1 text-[11px] font-semibold text-[#64748B] hover:bg-slate-100 dark:border-white/15 dark:text-slate-300 dark:hover:bg-slate-800"
+                                  >
+                                    Cancel
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmKickUid(s.uid)}
+                                  className="inline-flex items-center gap-1 rounded-lg border border-red-500/25 bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-100 dark:border-red-400/25 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/70"
+                                >
+                                  <UserX className="h-3 w-3" />
+                                  <span>Remove / Kick</span>
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {students.length === 0 && (
+                        <tr>
+                          <td colSpan={7} className="py-6 text-center text-[#64748B]">
+                            No registered students found.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
@@ -2850,13 +3124,52 @@ export const AdminDashboard: React.FC = () => {
                     />
                   )}
                   {entityType === 'announcement' && (
-                    <input
-                      type="text"
-                      value={entDescBn}
-                      onChange={(e) => setEntDescBn(e.target.value)}
-                      placeholder="Notice Content (Bangla)"
-                      className="rounded-xl border border-[#172554]/15 bg-white px-3.5 py-2.5 text-xs dark:border-white/15 dark:bg-slate-800 dark:text-white"
-                    />
+                    <>
+                      <input
+                        type="text"
+                        value={entDescBn}
+                        onChange={(e) => setEntDescBn(e.target.value)}
+                        placeholder="Notice Content (Bangla)"
+                        className="rounded-xl border border-[#172554]/15 bg-white px-3.5 py-2.5 text-xs dark:border-white/15 dark:bg-slate-800 dark:text-white"
+                      />
+                      <select
+                        value={entNoticeLevel}
+                        onChange={(e) => setEntNoticeLevel(e.target.value as NoticeLevel)}
+                        aria-label="Notice Severity Level"
+                        className="rounded-xl border border-[#172554]/15 bg-white px-3 py-2.5 text-xs font-semibold dark:border-white/15 dark:bg-slate-800 dark:text-white"
+                      >
+                        <option value="info">Standard Notice (সাধারণ নোটিশ)</option>
+                        <option value="warning">Warning Sign (সতর্কীকরণ নোটিশ)</option>
+                        <option value="emergency">Emergency Alert (জরুরি নোটিশ)</option>
+                      </select>
+                      <input
+                        type="url"
+                        value={entImageUrl}
+                        onChange={(e) => setEntImageUrl(e.target.value)}
+                        placeholder="Image URL (Optional - https://...)"
+                        className="rounded-xl border border-[#172554]/15 bg-white px-3.5 py-2.5 text-xs dark:border-white/15 dark:bg-slate-800 dark:text-white"
+                      />
+                      <input
+                        type="url"
+                        value={entVideoUrl}
+                        onChange={(e) => setEntVideoUrl(e.target.value)}
+                        placeholder="Video Link (Optional - YouTube or MP4 URL)"
+                        className="rounded-xl border border-[#172554]/15 bg-white px-3.5 py-2.5 text-xs dark:border-white/15 dark:bg-slate-800 dark:text-white"
+                      />
+                      {entImageUrl.trim() && (
+                        <div className="sm:col-span-3 flex items-center gap-3 rounded-xl border border-[#172554]/10 bg-white/75 p-2.5 text-xs dark:border-white/10 dark:bg-slate-900/60">
+                          <img
+                            src={entImageUrl.trim()}
+                            alt="Notice preview"
+                            className="h-12 w-20 rounded-lg object-cover border border-black/10"
+                          />
+                          <div className="flex items-center gap-1.5 text-[#64748B] dark:text-slate-300">
+                            <Megaphone className="h-3.5 w-3.5 text-[#263B91] dark:text-[#BFE8FF]" />
+                            <span>Notice image preview attached</span>
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
 
@@ -3520,9 +3833,17 @@ export const AdminDashboard: React.FC = () => {
               <div className="glass-surface rounded-3xl p-6">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <h3 className="font-display text-base font-bold text-[#172033] dark:text-white">
-                    Students ({filteredStudents.length})
+                    Registered Students ({filteredStudents.length})
                   </h3>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void loadAdminExtras()}
+                      className="inline-flex items-center gap-1 rounded-xl border border-[#172554]/15 bg-white px-3 py-1.5 text-xs font-semibold text-[#172554] hover:bg-[#E7F5FF] dark:border-white/15 dark:bg-slate-800 dark:text-[#BFE8FF]"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      <span>{language === 'bn' ? 'রিফ্রেশ' : 'Refresh'}</span>
+                    </button>
                     <input
                       type="text"
                       value={studentSearch}
@@ -3549,36 +3870,92 @@ export const AdminDashboard: React.FC = () => {
                   <table className="w-full text-left text-xs">
                     <thead>
                       <tr className="border-b border-[#172554]/10 text-[#64748B] dark:border-white/10">
-                        <th className="py-2">Student ID</th>
-                        <th className="py-2">Name</th>
-                        <th className="py-2">Class</th>
-                        <th className="py-2">Lessons</th>
-                        <th className="py-2">Status</th>
-                        <th className="py-2">Action</th>
+                        <th className="py-2 pr-3">Student ID</th>
+                        <th className="py-2 pr-3">Name</th>
+                        <th className="py-2 pr-3">Class</th>
+                        <th className="py-2 pr-3">XP</th>
+                        <th className="py-2 pr-3">Streak</th>
+                        <th className="py-2 pr-3">Lessons</th>
+                        <th className="py-2 pr-3">Status</th>
+                        <th className="py-2">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {filteredStudents.map((s) => (
                         <tr key={s.uid} className="border-b border-[#172554]/5 dark:border-white/5">
-                          <td className="py-2.5 font-mono-nums font-semibold">{s.studentId}</td>
-                          <td className="py-2.5 font-medium">{s.fullName}</td>
-                          <td className="py-2.5">{s.classId}</td>
-                          <td className="py-2.5 font-mono-nums">{s.completedLessonsCount ?? 0}</td>
-                          <td className="py-2.5">{s.accountStatus}</td>
-                          <td className="py-2.5">
-                            <button
-                              type="button"
-                              onClick={() => void toggleStudentStatus(s)}
-                              className="rounded-lg border border-[#172554]/15 px-2.5 py-1 text-[11px] font-semibold hover:bg-[#E7F5FF] dark:border-white/15"
+                          <td className="py-2.5 pr-3 font-mono-nums font-semibold text-[#172554] dark:text-[#BFE8FF]">
+                            {s.studentId}
+                          </td>
+                          <td className="py-2.5 pr-3 font-medium text-[#172033] dark:text-white">{s.fullName}</td>
+                          <td className="py-2.5 pr-3">{s.classId}</td>
+                          <td className="py-2.5 pr-3">
+                            <span className="inline-flex items-center rounded-md bg-[#E7F5FF] px-2 py-0.5 font-mono-nums text-[11px] font-bold text-[#172554] dark:bg-slate-800 dark:text-[#BFE8FF]">
+                              {s.xp ?? 0} XP
+                            </span>
+                          </td>
+                          <td className="py-2.5 pr-3">
+                            <span className="inline-flex items-center gap-1 font-mono-nums text-[11px] font-bold text-orange-600 dark:text-amber-300">
+                              <Flame className="h-3.5 w-3.5 fill-current" />
+                              {s.streakDays ?? 0}d
+                            </span>
+                          </td>
+                          <td className="py-2.5 pr-3 font-mono-nums">{s.completedLessonsCount ?? 0}</td>
+                          <td className="py-2.5 pr-3">
+                            <span
+                              className={`inline-flex rounded-md px-2 py-0.5 text-[10px] font-bold uppercase ${
+                                s.accountStatus === 'suspended'
+                                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                                  : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                              }`}
                             >
-                              {s.accountStatus === 'suspended' ? 'Activate' : 'Pause'}
-                            </button>
+                              {s.accountStatus}
+                            </span>
+                          </td>
+                          <td className="py-2.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => void toggleStudentStatus(s)}
+                                className="rounded-lg border border-[#172554]/15 px-2.5 py-1 text-[11px] font-semibold hover:bg-[#E7F5FF] dark:border-white/15 dark:hover:bg-slate-800"
+                              >
+                                {s.accountStatus === 'suspended' ? 'Activate' : 'Pause'}
+                              </button>
+                              {confirmKickUid === s.uid ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    disabled={removingStudentUid === s.uid}
+                                    onClick={() => void handleRemoveStudent(s)}
+                                    className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-red-700 disabled:opacity-50"
+                                  >
+                                    <UserX className="h-3 w-3" />
+                                    <span>{removingStudentUid === s.uid ? 'Removing...' : 'Confirm Kick'}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmKickUid(null)}
+                                    className="rounded-lg border border-[#172554]/15 px-2 py-1 text-[11px] font-semibold text-[#64748B] hover:bg-slate-100 dark:border-white/15 dark:text-slate-300 dark:hover:bg-slate-800"
+                                  >
+                                    Cancel
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmKickUid(s.uid)}
+                                  className="inline-flex items-center gap-1 rounded-lg border border-red-500/25 bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-100 dark:border-red-400/25 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/70"
+                                >
+                                  <UserX className="h-3 w-3" />
+                                  <span>Remove / Kick</span>
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}
                       {filteredStudents.length === 0 && (
                         <tr>
-                          <td colSpan={6} className="py-6 text-center text-[#64748B]">
+                          <td colSpan={8} className="py-6 text-center text-[#64748B]">
                             No student profiles found.
                           </td>
                         </tr>

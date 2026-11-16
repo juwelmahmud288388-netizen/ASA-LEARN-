@@ -827,11 +827,19 @@ export function localRemoveAdmin(uid: string): void {
 
 export function localAdminListStudents() {
   const map = loadStudentsMap();
-  const students = Object.values(map).map((b) => ({
-    ...b.profile,
-    completedLessonsCount: b.progressList.filter((p) => p.completed).length,
-    quizAttemptsCount: b.quizAttempts.length,
-  }));
+  const likesMap = loadLikesMap();
+  const students = Object.values(map)
+    .map((b) => {
+      const p = recomputeStudentGamification(b);
+      const likesCount = Math.max(Number(p.likesCount || 0), (likesMap[p.uid] || []).length);
+      return {
+        ...p,
+        likesCount,
+        completedLessonsCount: b.progressList.filter((pr) => pr.completed).length,
+        quizAttemptsCount: b.quizAttempts.length,
+      };
+    })
+    .sort((a, b) => Number(b.xp || 0) - Number(a.xp || 0) || Number(b.streakDays || 0) - Number(a.streakDays || 0));
   const overrides = loadContentOverrides();
   return { students, logs: overrides.activityLogs || [] };
 }
@@ -844,6 +852,28 @@ export function localAdminToggleStudentStatus(uid: string) {
   bundle.profile.updatedAt = new Date().toISOString();
   saveStudentsMap(map);
   return { ok: true, accountStatus: bundle.profile.accountStatus };
+}
+
+export function localAdminRemoveStudent(uid: string) {
+  const map = loadStudentsMap();
+  const target = map[uid];
+  if (target) {
+    delete map[uid];
+    saveStudentsMap(map);
+  }
+  const likesMap = loadLikesMap();
+  if (likesMap[uid]) {
+    delete likesMap[uid];
+    saveLikesMap(likesMap);
+  }
+  try {
+    if (localStorage.getItem(ACTIVE_STUDENT_UID_KEY) === uid) {
+      localStorage.removeItem(ACTIVE_STUDENT_UID_KEY);
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return { ok: true, uid };
 }
 
 // ============================================================================
@@ -1144,33 +1174,32 @@ export function localAiTutorReply(payload: {
   subjectContext: string;
   lessonContext?: string;
 }): { reply: string; matchedResources: MatchedStudyResource[] } {
-  const curriculum = localGetMergedCurriculum(false);
-  const qLower = payload.message.toLowerCase();
-  const matchedResources: MatchedStudyResource[] = curriculum.resources
-    .filter((r) => {
-      const hay = `${r.title} ${r.titleBn || ''} ${r.fileType}`.toLowerCase();
-      return hay.includes(payload.subjectContext.toLowerCase()) || qLower.split(/\s+/).some((w) => w.length > 3 && hay.includes(w));
-    })
-    .slice(0, 3)
-    .map((r) => ({
-      resourceId: r.resourceId,
-      lessonId: r.lessonId,
-      title: r.title,
-      titleBn: r.titleBn,
-      fileUrl: r.fileUrl,
-      fileType: r.fileType,
-    }));
+  const wantsResources =
+    /\b(pdf|notes?|sheet|book|books|link|links|file|download|resource|resources)\b|পিডিএফ|নোট|বই|শিট|লিংক|ডাউনলোড/i.test(
+      payload.message
+    );
 
-  const contextLine = payload.lessonContext ? `\n- **বর্তমান পাঠ:** ${payload.lessonContext}` : '';
-  const reply = `**আশা লার্নিং এআই টিউটর** (${payload.classContext} · ${payload.subjectContext})${contextLine}
+  let matchedResources: MatchedStudyResource[] = [];
+  if (wantsResources) {
+    const curriculum = localGetMergedCurriculum(false);
+    const qLower = payload.message.toLowerCase();
+    matchedResources = curriculum.resources
+      .filter((r) => {
+        const hay = `${r.title} ${r.titleBn || ''} ${r.fileType}`.toLowerCase();
+        return hay.includes(payload.subjectContext.toLowerCase()) || qLower.split(/\s+/).some((w) => w.length > 3 && hay.includes(w));
+      })
+      .slice(0, 3)
+      .map((r) => ({
+        resourceId: r.resourceId,
+        lessonId: r.lessonId,
+        title: r.title,
+        titleBn: r.titleBn,
+        fileUrl: r.fileUrl,
+        fileType: r.fileType,
+      }));
+  }
 
-চমৎকার প্রশ্ন করেছো! বিষয়টি যেন সহজে মাথায় গেঁথে যায়, সেজন্য ধাপে ধাপে বুঝিয়ে দিচ্ছি:
-
-- **মূল ধারণা:** প্রথমে পাঠ্যবইয়ের সংজ্ঞা ও **প্রদত্ত তথ্য (Given Data)** আলাদা করে খাতায় লিখে নাও।
-- **বাস্তব উদাহরণ ও যুক্তি:** মুখস্থ না করে সূত্র বা নিয়মটি *কেন* কাজ করে তা বাস্তব উদাহরণের সাথে মিলিয়ে বুঝে নাও।
-- **ধাপে ধাপে সমাধান:** সংশ্লিষ্ট **NCTB মূল সূত্র** প্রয়োগ করে প্রতিটি ধাপ পরিষ্কারভাবে ও সঠিক এককসহ হিসাব করো।
-
-তোমার প্রশ্নটি (**"${payload.message}"**) নিয়ে নির্দিষ্ট কোনো অংক, লাইন বা অধ্যায় দিলে আমি আরও বিস্তারিতভাবে ধাপে ধাপে বুঝিয়ে দেবো! চালিয়ে যাও, তুমি দারুণ করছো।`;
+  const reply = `এই মুহূর্তে তোমার ডিভাইসটি অফলাইনে আছে, তাই লাইভ **আশা লার্নিং এআই টিউটর** সার্ভারের সাথে সংযুক্ত হতে পারছি না। ইন্টারনেট সংযোগ চালু করে আবার প্রশ্ন করো—আমি সাথে সাথে সঠিক উত্তর দিয়ে দেবো।`;
 
   return { reply, matchedResources };
 }

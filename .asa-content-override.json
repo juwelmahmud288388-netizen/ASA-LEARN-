@@ -1,13 +1,41 @@
 {
   "upserts": {
-    "resources": {}
+    "resources": {},
+    "announcements": {}
   },
   "deletes": {
     "resources": [
       "res_e2e_1794743465400"
+    ],
+    "announcements": [
+      "ann_smoke_1794818457451"
     ]
   },
   "activityLogs": [
+    {
+      "logId": "log_1794819587800",
+      "actorUid": "asa_owner_admin",
+      "actorName": "Primary Owner",
+      "action": "REMOVED_STUDENT",
+      "target": "Kick Test Student (ASA-4939)",
+      "timestamp": "2026-11-16T08:59:47.800Z"
+    },
+    {
+      "logId": "log_1794818457571",
+      "actorId": "asa_owner_admin",
+      "actorName": "Primary Owner",
+      "action": "DELETED_ANNOUNCEMENTS",
+      "target": "ann_smoke_1794818457451",
+      "timestamp": "2026-11-16T08:40:57.571Z"
+    },
+    {
+      "logId": "log_1794818457457",
+      "actorId": "asa_owner_admin",
+      "actorName": "Primary Owner",
+      "action": "SAVED_ANNOUNCEMENTS",
+      "target": "Urgent Exam Update",
+      "timestamp": "2026-11-16T08:40:57.457Z"
+    },
     {
       "logId": "log_1794743465492",
       "actorId": "asa_owner_admin",

@@ -298,12 +298,15 @@ service cloud.firestore {
 
     function isValidAnnouncement(data) {
       return data.keys().hasAll(['announcementId', 'title', 'content', 'targetClasses', 'published', 'createdAt'])
-        && data.keys().hasOnly(['announcementId', 'title', 'titleBn', 'content', 'contentBn', 'targetClasses', 'published', 'createdAt'])
+        && data.keys().hasOnly(['announcementId', 'title', 'titleBn', 'content', 'contentBn', 'noticeLevel', 'imageUrl', 'videoUrl', 'targetClasses', 'published', 'createdAt'])
         && isValidId(data.announcementId)
         && isNonEmptyString(data.title, 200)
         && (!('titleBn' in data) || isOptionalString(data.titleBn, 200))
         && isNonEmptyString(data.content, 2000)
         && (!('contentBn' in data) || isOptionalString(data.contentBn, 2000))
+        && (!('noticeLevel' in data) || data.noticeLevel in ['info', 'warning', 'emergency'])
+        && (!('imageUrl' in data) || isOptionalString(data.imageUrl, 1000))
+        && (!('videoUrl' in data) || isOptionalString(data.videoUrl, 1000))
         && data.targetClasses is list && data.targetClasses.size() <= 10 && (data.targetClasses.size() == 0 || data.targetClasses[0] is string)
         && data.published is bool
         && data.createdAt is timestamp;

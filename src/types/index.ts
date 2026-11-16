@@ -282,12 +282,17 @@ export interface AiConversation {
   updatedAt: unknown;
 }
 
+export type NoticeLevel = 'info' | 'warning' | 'emergency';
+
 export interface Announcement {
   announcementId: string;
   title: string;
   titleBn?: string;
   content: string;
   contentBn?: string;
+  noticeLevel?: NoticeLevel;
+  imageUrl?: string;
+  videoUrl?: string;
   targetClasses: string[];
   published: boolean;
   createdAt: unknown;

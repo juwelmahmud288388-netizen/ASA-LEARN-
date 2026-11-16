@@ -714,7 +714,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ],
     resources: ['resourceId', 'lessonId', 'title', 'titleBn', 'fileUrl', 'fileType', 'downloadable'],
     quizzes: ['quizId', 'lessonId', 'title', 'questions', 'creativeQuestions', 'status'],
-    announcements: ['announcementId', 'title', 'titleBn', 'content', 'contentBn', 'targetClasses', 'published'],
+    announcements: ['announcementId', 'title', 'titleBn', 'content', 'contentBn', 'noticeLevel', 'imageUrl', 'videoUrl', 'targetClasses', 'published'],
   };
 
   const sanitizeForFirestore = (colName: string, obj: Record<string, unknown>) => {
@@ -727,6 +727,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     if ('order' in out) {
       out.order = Math.max(0, Math.round(Number(out.order || 0)));
+    }
+    if (colName === 'announcements') {
+      const lvl = String(out.noticeLevel || '').trim();
+      out.noticeLevel = lvl === 'emergency' || lvl === 'warning' ? lvl : 'info';
+      if (typeof out.imageUrl === 'string' && !out.imageUrl.trim()) delete out.imageUrl;
+      if (typeof out.videoUrl === 'string' && !out.videoUrl.trim()) delete out.videoUrl;
     }
     if (colName === 'lessons') {
       out.chapterId = String(out.chapterId || '').trim() || 'general';

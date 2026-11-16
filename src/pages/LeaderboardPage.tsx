@@ -19,10 +19,12 @@ export const LeaderboardPage: React.FC = () => {
       credentials: 'include',
     })
       .then((res) => {
-        if (res.ok && res.data && Array.isArray(res.data.leaderboard) && res.data.leaderboard.length > 0) {
+        if (res.ok && res.data && Array.isArray(res.data.leaderboard)) {
           setScholars(res.data.leaderboard);
-        } else {
+        } else if (shouldFallbackToLocal(res)) {
           setScholars(localGetLeaderboard());
+        } else {
+          setScholars([]);
         }
       })
       .finally(() => setLoading(false));

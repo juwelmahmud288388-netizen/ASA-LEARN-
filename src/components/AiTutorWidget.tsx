@@ -1,15 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Bot,
   Check,
   Copy,
   ExternalLink,
   FileText,
+  History,
   Loader2,
+  MessageSquare,
   Mic,
   MicOff,
   Send,
   Square,
+  SquarePen,
   Trash2,
   Volume2,
   X,
@@ -17,10 +19,40 @@ import {
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { localAiTutorReply } from '../lib/localBackend';
-import { safeJsonFetch, shouldFallbackToLocal } from '../lib/safeFetch';
-import { createClientId } from '../lib/utils';
-import { useApp } from '../context/AppContext';
+import { safeJsonFetch } from '../lib/safeFetch';
+import { BRAND_LOGO_PATH, createClientId, getLogoContrastClass } from '../lib/utils';
+import { getStudentAuthHeaders, useApp } from '../context/AppContext';
 import type { AiChatMessage, MatchedStudyResource } from '../types';
+
+interface LocalAiChatSession {
+  convId: string;
+  title: string;
+  classId: string;
+  subject: string;
+  messages: AiChatMessage[];
+  updatedAt: string;
+}
+
+const MAX_LOCAL_SESSIONS = 30;
+
+function readLocalSessions(storageKey: string): LocalAiChatSession[] {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as LocalAiChatSession[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalSessions(storageKey: string, sessions: LocalAiChatSession[]): void {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(sessions.slice(0, MAX_LOCAL_SESSIONS)));
+  } catch {
+    // ignore quota errors
+  }
+}
 
 function renderInlineMarkdown(text: string): React.ReactNode[] {
   const tokens = text.split(/(\*\*[^*]+\*\*|`[^`]+`|\*[^*\n]+\*)/g);
@@ -144,10 +176,19 @@ export const AiTutorWidget: React.FC = () => {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<AiChatMessage[]>([]);
   const [convId, setConvId] = useState<string>(() => createClientId('conv'));
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [quotaRemaining, setQuotaRemaining] = useState<number | null>(null);
+
+  const sessionStorageKey = useMemo(
+    () => `asa_ai_chat_sessions_v1:${userProfile?.uid || firebaseUser?.uid || 'guest'}`,
+    [userProfile?.uid, firebaseUser?.uid]
+  );
+  const [chatSessions, setChatSessions] = useState<LocalAiChatSession[]>(() =>
+    typeof window !== 'undefined' ? readLocalSessions(sessionStorageKey) : []
+  );
 
   // Voice Recognition & Audio Playback
   const [listening, setListening] = useState(false);
@@ -158,6 +199,30 @@ export const AiTutorWidget: React.FC = () => {
   const recognitionRef = useRef<{ stop: () => void; abort?: () => void } | null>(null);
   const persistedConvIdsRef = useRef<Set<string>>(new Set());
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setChatSessions(readLocalSessions(sessionStorageKey));
+  }, [sessionStorageKey]);
+
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const firstUserMsg = messages.find((m) => m.role === 'user')?.text || messages[0]?.text || 'ASA LEARN Chat';
+    const title = firstUserMsg.trim().slice(0, 72) || 'ASA LEARN Chat';
+    const entry: LocalAiChatSession = {
+      convId,
+      title,
+      classId: selectedClass,
+      subject: selectedSubject,
+      messages: messages.slice(-40),
+      updatedAt: new Date().toISOString(),
+    };
+    setChatSessions((prev) => {
+      const filtered = prev.filter((s) => s.convId !== convId);
+      const next = [entry, ...filtered].slice(0, MAX_LOCAL_SESSIONS);
+      writeLocalSessions(sessionStorageKey, next);
+      return next;
+    });
+  }, [messages, convId, selectedClass, selectedSubject, sessionStorageKey]);
 
   useEffect(() => {
     if (aiContextLesson) {
@@ -388,7 +453,7 @@ export const AiTutorWidget: React.FC = () => {
 
     try {
       const idToken = firebaseUser ? await firebaseUser.getIdToken() : null;
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const headers = getStudentAuthHeaders({ 'Content-Type': 'application/json' });
       if (idToken) headers.Authorization = `Bearer ${idToken}`;
 
       const res = await safeJsonFetch<{
@@ -407,7 +472,7 @@ export const AiTutorWidget: React.FC = () => {
           classContext: classLabel,
           subjectContext: selectedSubject,
           lessonContext: aiContextLesson ? `${aiContextLesson.title} (${aiContextLesson.titleBn})` : '',
-          history: messages.slice(-6),
+          history: messages.slice(-14),
         }),
       });
 
@@ -417,10 +482,11 @@ export const AiTutorWidget: React.FC = () => {
       if (res.ok && res.data?.reply) {
         replyText = res.data.reply;
         if (typeof res.data.quotaRemaining === 'number') setQuotaRemaining(res.data.quotaRemaining);
-        matchedResources = Array.isArray(res.data.matchedResources)
-          ? res.data.matchedResources
-          : undefined;
-      } else if (shouldFallbackToLocal(res)) {
+        matchedResources =
+          Array.isArray(res.data.matchedResources) && res.data.matchedResources.length > 0
+            ? res.data.matchedResources
+            : undefined;
+      } else if (typeof navigator !== 'undefined' && !navigator.onLine) {
         const fallback = localAiTutorReply({
           message: text,
           language,
@@ -429,9 +495,14 @@ export const AiTutorWidget: React.FC = () => {
           lessonContext: aiContextLesson ? `${aiContextLesson.title} (${aiContextLesson.titleBn})` : undefined,
         });
         replyText = fallback.reply;
-        matchedResources = fallback.matchedResources;
+        matchedResources = fallback.matchedResources.length > 0 ? fallback.matchedResources : undefined;
       } else {
-        throw new Error(res.errorMessage || 'AI Tutor request failed');
+        throw new Error(
+          res.errorMessage ||
+            (language === 'bn'
+              ? 'এআই টিউটর সার্ভার থেকে উত্তর পাওয়া যায়নি। অনুগ্রহ করে একটু পর আবার চেষ্টা করুন।'
+              : 'AI Tutor could not reach the Gemini service. Please verify server GEMINI_API_KEY configuration.')
+        );
       }
 
       const botMsg: AiChatMessage = {
@@ -451,11 +522,37 @@ export const AiTutorWidget: React.FC = () => {
     }
   };
 
-  const clearChat = () => {
+  const startNewChat = () => {
     stopAudio();
+    stopVoiceInput();
     setMessages([]);
     setConvId(createClientId('conv'));
     setError(null);
+    setHistoryOpen(false);
+  };
+
+  const loadChatSession = (session: LocalAiChatSession) => {
+    stopAudio();
+    stopVoiceInput();
+    setConvId(session.convId);
+    setSelectedClass(session.classId || userProfile?.classId || 'class-9');
+    setSelectedSubject(session.subject || 'Mathematics');
+    setMessages(Array.isArray(session.messages) ? session.messages : []);
+    setError(null);
+    setHistoryOpen(false);
+  };
+
+  const deleteChatSession = (targetConvId: string) => {
+    setChatSessions((prev) => {
+      const next = prev.filter((s) => s.convId !== targetConvId);
+      writeLocalSessions(sessionStorageKey, next);
+      return next;
+    });
+    if (convId === targetConvId) {
+      setMessages([]);
+      setConvId(createClientId('conv'));
+      setError(null);
+    }
   };
 
   const copyMsg = async (id: string, text: string) => {
@@ -464,6 +561,9 @@ export const AiTutorWidget: React.FC = () => {
     setTimeout(() => setCopiedId(null), 1500);
   };
 
+  const brandLogoUrl = appSettings.branding.logoUrl || BRAND_LOGO_PATH;
+  const logoContrastClass = getLogoContrastClass(appSettings.branding.logoUrl);
+
   return (
     <>
       {/* Floating AI Assistant Trigger */}
@@ -471,11 +571,24 @@ export const AiTutorWidget: React.FC = () => {
         <button
           type="button"
           onClick={() => setAiDrawerOpen(true)}
-          aria-label="Open Asha Learning AI Tutor"
-          className="fixed bottom-20 right-4 md:bottom-5 md:right-5 z-40 hidden md:flex items-center gap-2 rounded-2xl bg-[#172554] px-4 py-3 text-sm font-semibold text-white shadow-[0_12px_32px_rgba(23,37,84,0.32)] transition hover:-translate-y-0.5 hover:bg-[#263B91] focus-visible:outline-2 focus-visible:outline-[#BFE8FF] dark:bg-[#BFE8FF] dark:text-[#172554]"
+          aria-label="Open ASA LEARN AI Tutor"
+          className="fixed bottom-20 right-4 md:bottom-5 md:right-5 z-40 hidden md:flex items-center gap-3 rounded-2xl border border-white/20 bg-[#172554] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_12px_32px_rgba(23,37,84,0.32)] transition hover:-translate-y-0.5 hover:bg-[#263B91] focus-visible:outline-2 focus-visible:outline-[#BFE8FF] dark:bg-[#BFE8FF] dark:text-[#172554]"
         >
-          <Bot className="h-5 w-5" />
-          <span>{language === 'bn' ? 'আশা এআই টিউটর' : 'Asha AI Tutor'}</span>
+          <img
+            src={brandLogoUrl}
+            alt="ASA LEARN logo"
+            className={`h-9 w-auto shrink-0 object-contain transition-all duration-200 ${
+              !appSettings.branding.logoUrl || appSettings.branding.logoUrl.trim() === '' || appSettings.branding.logoUrl.trim() === BRAND_LOGO_PATH
+                ? 'brightness-0 invert dark:brightness-100 dark:invert-0'
+                : 'rounded-lg bg-white/95 px-1.5 py-0.5'
+            }`}
+          />
+          <span className="flex flex-col items-start leading-tight">
+            <span className="font-display text-xs font-extrabold tracking-wider uppercase">ASA LEARN</span>
+            <span className="text-[10px] font-medium opacity-85">
+              {language === 'bn' ? 'এআই টিউটর' : 'AI Tutor'}
+            </span>
+          </span>
         </button>
       )}
 
@@ -483,24 +596,55 @@ export const AiTutorWidget: React.FC = () => {
       {aiDrawerOpen && (
         <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/35 backdrop-blur-xs">
           <aside className="flex h-[100dvh] w-full max-w-lg flex-col border-l border-white/50 bg-[#F5F9FF]/95 backdrop-blur-2xl dark:border-white/10 dark:bg-[#0A1128]/95">
-            {/* Compact Header */}
-            <div className="flex items-center justify-between border-b border-[#172554]/10 px-5 py-4 dark:border-white/10">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#172554] text-[#BFE8FF]">
-                  <Bot className="h-5 w-5" />
-                </div>
-                <div>
-                  <h2 className="font-display text-base font-bold text-[#172033] dark:text-white">
-                    {language === 'bn' ? 'আশা লার্নিং এআই টিউটর' : 'Asha Learning AI Tutor'}
-                  </h2>
-                  <p className="text-xs text-[#64748B] dark:text-slate-400">
+            {/* Compact Branded Header */}
+            <div className="flex items-center justify-between gap-2 border-b border-[#172554]/10 px-4 py-3 dark:border-white/10">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <img
+                  src={brandLogoUrl}
+                  alt="ASA LEARN logo"
+                  className={`h-10 w-auto shrink-0 object-contain sm:h-11 ${logoContrastClass}`}
+                />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <h2 className="font-display truncate text-sm font-extrabold tracking-wider text-[#172554] uppercase sm:text-base dark:text-white">
+                      ASA LEARN
+                    </h2>
+                    <span className="shrink-0 rounded-md bg-[#E7F5FF] px-1.5 py-0.5 text-[10px] font-bold text-[#263B91] dark:bg-slate-800 dark:text-[#BFE8FF]">
+                      {language === 'bn' ? 'এআই টিউটর' : 'AI Tutor'}
+                    </span>
+                  </div>
+                  <p className="truncate text-[11px] text-[#64748B] dark:text-slate-400">
                     {classLabel} · {selectedSubject}
-                    {quotaRemaining !== null ? ` · ${quotaRemaining} left today` : ''}
+                    {quotaRemaining !== null ? ` · ${quotaRemaining} left` : ''}
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1.5">
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={startNewChat}
+                  title={language === 'bn' ? 'নতুন চ্যাট শুরু করুন' : 'Start New Chat'}
+                  className="inline-flex items-center gap-1 rounded-lg bg-[#172554] px-2.5 py-1.5 text-[11px] font-semibold text-white transition hover:bg-[#263B91] dark:bg-[#BFE8FF] dark:text-[#172554]"
+                >
+                  <SquarePen className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">{language === 'bn' ? 'নতুন চ্যাট' : 'New Chat'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHistoryOpen((prev) => !prev)}
+                  title={language === 'bn' ? 'চ্যাট হিস্ট্রি' : 'Chat History'}
+                  className={`relative inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 text-[11px] font-semibold transition ${
+                    historyOpen
+                      ? 'border-[#263B91] bg-[#E7F5FF] text-[#172554] dark:border-[#BFE8FF]/40 dark:bg-slate-800 dark:text-[#BFE8FF]'
+                      : 'border-[#172554]/15 bg-white/80 text-[#172554] hover:bg-[#E7F5FF] dark:border-white/15 dark:bg-slate-800/80 dark:text-slate-200'
+                  }`}
+                >
+                  <History className="h-3.5 w-3.5" />
+                  {chatSessions.length > 0 && (
+                    <span className="font-mono-nums text-[10px] font-bold">{chatSessions.length}</span>
+                  )}
+                </button>
                 {appSettings.aiSettings.allowVoiceTutor && (
                   <button
                     type="button"
@@ -518,14 +662,6 @@ export const AiTutorWidget: React.FC = () => {
                     <Volume2 className="h-4 w-4" />
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={clearChat}
-                  title={language === 'bn' ? 'চ্যাট মুছুন' : 'Clear conversation'}
-                  className="rounded-lg p-2 text-slate-500 hover:bg-slate-200/60 dark:hover:bg-slate-800"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
                 <button
                   type="button"
                   onClick={() => setAiDrawerOpen(false)}
@@ -568,16 +704,100 @@ export const AiTutorWidget: React.FC = () => {
               </div>
             </div>
 
+            {/* Collapsible Chat History Panel */}
+            {historyOpen && (
+              <div className="border-b border-[#172554]/10 bg-white/90 px-4 py-3 dark:border-white/10 dark:bg-slate-900/90">
+                <div className="flex items-center justify-between gap-2 pb-2">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-[#172554] dark:text-[#BFE8FF]">
+                    <History className="h-3.5 w-3.5" />
+                    <span>{language === 'bn' ? 'পূর্বের চ্যাট হিস্ট্রি' : 'Chat History'}</span>
+                    <span className="font-mono-nums text-[10px] opacity-70">({chatSessions.length})</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={startNewChat}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#263B91] hover:underline dark:text-[#BFE8FF]"
+                  >
+                    <SquarePen className="h-3 w-3" />
+                    <span>{language === 'bn' ? '+ নতুন চ্যাট' : '+ New Chat'}</span>
+                  </button>
+                </div>
+
+                {chatSessions.length === 0 ? (
+                  <p className="py-3 text-center text-xs text-[#64748B] dark:text-slate-400">
+                    {language === 'bn'
+                      ? 'এখনো কোনো চ্যাট সেভ করা হয়নি। প্রশ্ন করলে স্বয়ংক্রিয়ভাবে এখানে সেভ হবে।'
+                      : 'No saved chat sessions yet. Start asking questions to save sessions automatically.'}
+                  </p>
+                ) : (
+                  <div className="max-h-56 space-y-1.5 overflow-y-auto pr-1">
+                    {chatSessions.map((sess) => {
+                      const active = sess.convId === convId;
+                      return (
+                        <div
+                          key={sess.convId}
+                          className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs transition ${
+                            active
+                              ? 'border-[#263B91]/40 bg-[#E7F5FF]/80 dark:border-[#BFE8FF]/35 dark:bg-slate-800'
+                              : 'border-[#172554]/10 bg-white hover:bg-[#F5F9FF] dark:border-white/10 dark:bg-slate-800/60 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => loadChatSession(sess)}
+                            className="flex min-w-0 flex-1 items-start gap-2 text-left"
+                          >
+                            <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#263B91] dark:text-[#BFE8FF]" />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate font-semibold text-[#172033] dark:text-white">
+                                {sess.title}
+                              </p>
+                              <p className="mt-0.5 truncate text-[10px] text-[#64748B] dark:text-slate-400">
+                                {sess.subject} · {sess.messages.length}{' '}
+                                {language === 'bn' ? 'টি বার্তা' : 'msgs'} ·{' '}
+                                {new Date(sess.updatedAt).toLocaleDateString(language === 'bn' ? 'bn-BD' : 'en-US', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                })}
+                              </p>
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteChatSession(sess.convId)}
+                            title={language === 'bn' ? 'সেশন মুছুন' : 'Delete session'}
+                            className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-300"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Messages Area */}
             <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
               {messages.length === 0 && (
                 <div className="space-y-4 py-3">
                   <div className="glass-surface rounded-2xl p-4 text-sm text-[#172033] dark:text-slate-200">
+                    <div className="mb-2.5 flex items-center gap-3">
+                      <img
+                        src={brandLogoUrl}
+                        alt="ASA LEARN logo"
+                        className={`h-9 w-auto shrink-0 object-contain sm:h-10 ${logoContrastClass}`}
+                      />
+                      <span className="font-display text-sm font-extrabold tracking-wider text-[#172554] uppercase dark:text-[#BFE8FF]">
+                        ASA LEARN · AI TUTOR
+                      </span>
+                    </div>
                     <p className="font-semibold">
-                      আসসালামু আলাইকুম / হ্যালো! আমি তোমার <strong>আশা লার্নিং এআই টিউটর</strong>।
+                      আসসালামু আলাইকুম / হ্যালো! আমি তোমার <strong>ASA LEARN এআই টিউটর</strong>।
                     </p>
                     <p className="mt-1 text-xs leading-relaxed text-[#64748B] dark:text-slate-400">
-                      গণিত, বিজ্ঞান, ইতিহাস, ভাষা বা যেকোনো বিষয়ের প্রশ্ন করো — আমি ধাপে ধাপে সহজ উদাহরণসহ বুঝিয়ে দেবো এবং প্রয়োজনীয় স্টাডি নোট/PDF লিংকও দেবো।
+                      গণিত, বিজ্ঞান, ইতিহাস, ভাষা বা যেকোনো বিষয়ের প্রশ্ন করো — আমি আগের প্রসঙ্গ মনে রেখে ধাপে ধাপে সহজ উদাহরণসহ বুঝিয়ে দেবো।
                     </p>
                   </div>
 
