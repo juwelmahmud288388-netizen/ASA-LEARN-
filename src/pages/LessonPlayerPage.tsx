@@ -8,7 +8,9 @@ import {
   ChevronDown,
   ChevronUp,
   Download,
+  ExternalLink,
   FileText,
+  HardDriveDownload,
   HelpCircle,
   Loader2,
   Maximize2,
@@ -16,12 +18,21 @@ import {
   RotateCcw,
   Save,
   Sparkles,
+  Trash2,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { t } from '../i18n/translations';
 import { localGenerateLessonPractice } from '../lib/localBackend';
+import {
+  deleteCachedOfflineVideo,
+  downloadVideoToDevice,
+  getCachedOfflineVideoUrl,
+  getSavedOfflineMetaMap,
+  isDirectPlayableVideoUrl,
+  saveOfflineMetaEntry,
+} from '../lib/offlineVideo';
 import { safeJsonFetch, shouldFallbackToLocal } from '../lib/safeFetch';
-import { getYouTubeEmbedUrl } from '../lib/utils';
+import { extractYouTubeId, getYouTubeEmbedUrl } from '../lib/utils';
 
 export const LessonPlayerPage: React.FC = () => {
   const {
@@ -56,7 +67,16 @@ export const LessonPlayerPage: React.FC = () => {
   const [theaterMode, setTheaterMode] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const directVideoRef = useRef<HTMLVideoElement>(null);
   const playerContainerRef = useRef<HTMLDivElement>(null);
+
+  // Zero-DB client-side offline video state
+  const [offlineBlobUrl, setOfflineBlobUrl] = useState<string | null>(null);
+  const [isSavedOffline, setIsSavedOffline] = useState(false);
+  const [downloadingVideo, setDownloadingVideo] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
+  const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
+  const [showYoutubeSaveTip, setShowYoutubeSaveTip] = useState(false);
 
   const hasStudentAccess = Boolean(userProfile?.uid || firebaseUser?.uid);
 
@@ -95,6 +115,37 @@ export const LessonPlayerPage: React.FC = () => {
     }
   }, [lesson?.lessonId, hasStudentAccess]);
 
+  useEffect(() => {
+    let active = true;
+    let createdObjectUrl: string | null = null;
+    setDownloadNotice(null);
+    setShowYoutubeSaveTip(false);
+    setDownloadProgress(null);
+
+    const url = (lesson?.youtubeUrl || '').trim();
+    const metaMap = getSavedOfflineMetaMap();
+    setIsSavedOffline(Boolean(lesson && metaMap[lesson.lessonId]));
+
+    if (lesson && isDirectPlayableVideoUrl(url)) {
+      void getCachedOfflineVideoUrl(url).then((cachedUrl) => {
+        if (!active) {
+          if (cachedUrl) URL.revokeObjectURL(cachedUrl);
+          return;
+        }
+        createdObjectUrl = cachedUrl;
+        setOfflineBlobUrl(cachedUrl);
+        if (cachedUrl) setIsSavedOffline(true);
+      });
+    } else {
+      setOfflineBlobUrl(null);
+    }
+
+    return () => {
+      active = false;
+      if (createdObjectUrl) URL.revokeObjectURL(createdObjectUrl);
+    };
+  }, [lesson?.lessonId, lesson?.youtubeUrl]);
+
   if (!lesson) {
     return (
       <div className="mx-auto max-w-[1100px] px-4 py-16 text-center">
@@ -128,11 +179,16 @@ export const LessonPlayerPage: React.FC = () => {
   const isBookmarked = bookmarks.some((b) => b.itemId === lesson.lessonId && b.itemType === 'lesson');
 
   const cleanUrl = (lesson.youtubeUrl || '').trim();
-  const isDirectVideo = /\.(mp4|webm|ogg)(\?.*)?$/i.test(cleanUrl);
+  const isDirectVideo = isDirectPlayableVideoUrl(cleanUrl);
   const embedUrl = cleanUrl && !isDirectVideo ? getYouTubeEmbedUrl(cleanUrl) : '';
+  const youtubeWatchId = cleanUrl && !isDirectVideo ? extractYouTubeId(cleanUrl) : null;
+  const youtubeWatchUrl = youtubeWatchId ? `https://www.youtube.com/watch?v=${youtubeWatchId}` : cleanUrl;
 
   const applyPlaybackRate = (rate: number) => {
     setPlaybackRate(rate);
+    if (directVideoRef.current) {
+      directVideoRef.current.playbackRate = rate;
+    }
     try {
       iframeRef.current?.contentWindow?.postMessage(
         JSON.stringify({ event: 'command', func: 'setPlaybackRate', args: [rate] }),
@@ -147,6 +203,70 @@ export const LessonPlayerPage: React.FC = () => {
     if (playerContainerRef.current?.requestFullscreen) {
       void playerContainerRef.current.requestFullscreen();
     }
+  };
+
+  const handleClientSideVideoDownload = async () => {
+    if (!cleanUrl) return;
+    if (!isDirectVideo) {
+      saveOfflineMetaEntry({
+        lessonId: lesson.lessonId,
+        title: lesson.title,
+        titleBn: lesson.titleBn,
+        videoUrl: cleanUrl,
+        isDirectVideo: false,
+        savedAt: new Date().toISOString(),
+      });
+      setIsSavedOffline(true);
+      setShowYoutubeSaveTip((prev) => !prev);
+      setDownloadNotice(
+        language === 'bn'
+          ? 'পাঠের তথ্য ও নোট ডিভাইসে সেভ হয়েছে। অফলাইন ভিডিওর জন্য নিচের YouTube অপশন ব্যবহার করুন।'
+          : 'Lesson notes saved to your device locally. Use the YouTube option below to save the video stream.'
+      );
+      return;
+    }
+
+    setDownloadingVideo(true);
+    setDownloadProgress(0);
+    setDownloadNotice(null);
+    try {
+      const result = await downloadVideoToDevice({
+        lessonId: lesson.lessonId,
+        title: language === 'bn' ? lesson.titleBn || lesson.title : lesson.title,
+        titleBn: lesson.titleBn,
+        url: cleanUrl,
+        onProgress: (pct) => setDownloadProgress(pct),
+      });
+      setIsSavedOffline(true);
+      const cachedUrl = await getCachedOfflineVideoUrl(cleanUrl);
+      if (cachedUrl) setOfflineBlobUrl(cachedUrl);
+      const sizeMb = result.sizeBytes ? ` (${(result.sizeBytes / (1024 * 1024)).toFixed(1)} MB)` : '';
+      setDownloadNotice(
+        language === 'bn'
+          ? `ভিডিওটি সরাসরি আপনার ডিভাইসে ডাউনলোড ও অফলাইনে সেভ হয়েছে${sizeMb}!`
+          : `Saved to your device Downloads / Gallery & local offline cache${sizeMb}!`
+      );
+    } catch {
+      setDownloadNotice(
+        language === 'bn'
+          ? 'ভিডিওটি ডাউনলোড শুরু করা হয়েছে। ব্রাউজার ডাউনলোড ফোল্ডার চেক করুন।'
+          : 'Download triggered — please check your device Downloads folder.'
+      );
+    } finally {
+      setDownloadingVideo(false);
+    }
+  };
+
+  const handleRemoveOfflineCopy = async () => {
+    await deleteCachedOfflineVideo(lesson.lessonId, cleanUrl);
+    if (offlineBlobUrl) {
+      URL.revokeObjectURL(offlineBlobUrl);
+      setOfflineBlobUrl(null);
+    }
+    setIsSavedOffline(false);
+    setDownloadNotice(
+      language === 'bn' ? 'ডিভাইসের অফলাইন কপি মুছে ফেলা হয়েছে।' : 'Removed local offline copy from this device.'
+    );
   };
 
   const handleGenerateAiPractice = async () => {
@@ -226,7 +346,15 @@ export const LessonPlayerPage: React.FC = () => {
 
   const renderVideoBox = () => {
     if (isDirectVideo) {
-      return <video controls src={cleanUrl} className="h-full w-full bg-black object-contain" />;
+      return (
+        <video
+          ref={directVideoRef}
+          controls
+          playsInline
+          src={offlineBlobUrl || cleanUrl}
+          className="h-full w-full bg-black object-contain"
+        />
+      );
     }
     if (embedUrl) {
       return (
@@ -350,6 +478,53 @@ export const LessonPlayerPage: React.FC = () => {
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
+                {cleanUrl && (
+                  <button
+                    type="button"
+                    disabled={downloadingVideo}
+                    onClick={() => void handleClientSideVideoDownload()}
+                    className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-lg px-3 py-1 font-semibold transition active:scale-95 ${
+                      isSavedOffline
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-500/25 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:text-emerald-300'
+                        : 'border border-[#172554]/15 bg-[#E7F5FF] text-[#172554] hover:bg-[#BFE8FF] dark:border-white/15 dark:bg-slate-800 dark:text-[#BFE8FF]'
+                    }`}
+                  >
+                    {downloadingVideo ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <HardDriveDownload className="h-3.5 w-3.5" />
+                    )}
+                    <span>
+                      {downloadingVideo
+                        ? downloadProgress !== null
+                          ? `${language === 'bn' ? 'ডাউনলোড' : 'Saving'} ${downloadProgress}%`
+                          : language === 'bn'
+                            ? 'সেভ হচ্ছে...'
+                            : 'Saving...'
+                        : isDirectVideo
+                          ? isSavedOffline
+                            ? language === 'bn'
+                              ? 'অফলাইনে সেভ আছে · আবার ডাউনলোড'
+                              : 'Offline Ready · Save Again'
+                            : language === 'bn'
+                              ? 'ডিভাইসে ডাউনলোড'
+                              : 'Download Video'
+                          : language === 'bn'
+                            ? 'অফলাইন সেভ'
+                            : 'Save Offline'}
+                    </span>
+                  </button>
+                )}
+                {isSavedOffline && (
+                  <button
+                    type="button"
+                    onClick={() => void handleRemoveOfflineCopy()}
+                    title={language === 'bn' ? 'অফলাইন কপি মুছুন' : 'Remove local offline copy'}
+                    className="inline-flex min-h-[36px] items-center justify-center rounded-lg px-2 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-300"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
                 {embedUrl && (
                   <button
                     type="button"
@@ -382,6 +557,28 @@ export const LessonPlayerPage: React.FC = () => {
                 )}
               </div>
             </div>
+
+            {(downloadNotice || showYoutubeSaveTip) && (
+              <div className="mx-2.5 mb-2.5 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#172554]/10 bg-[#E7F5FF]/70 px-3.5 py-2.5 text-xs dark:border-white/10 dark:bg-slate-900/80">
+                <p className="font-medium text-[#172033] dark:text-slate-200">
+                  {downloadNotice ||
+                    (language === 'bn'
+                      ? 'YouTube অ্যাপে সরাসরি ভিডিও অফলাইন সেভ করতে পাশে ক্লিক করুন।'
+                      : 'Use YouTube’s native Download button to save this lecture offline in the YouTube app.')}
+                </p>
+                {showYoutubeSaveTip && youtubeWatchUrl && (
+                  <a
+                    href={youtubeWatchUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-[#172554] px-3 py-1.5 text-[11px] font-bold text-white hover:bg-[#263B91] dark:bg-[#BFE8FF] dark:text-[#172554]"
+                  >
+                    <span>{language === 'bn' ? 'YouTube-এ খুলুন' : 'Open in YouTube App'}</span>
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Ask a Doubt Banner */}

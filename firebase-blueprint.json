@@ -373,6 +373,18 @@
         "timestamp": { "type": "string", "format": "date-time" }
       },
       "required": ["logId", "actorId", "action", "target", "timestamp"]
+    },
+    "ContentDelete": {
+      "title": "ContentDelete",
+      "description": "Deletion tombstone so removed default or cloud items stay deleted across all visitors.",
+      "type": "object",
+      "properties": {
+        "deleteId": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "collection": { "type": "string", "enum": ["categories", "classes", "subjects", "chapters", "topics", "lessons", "videos", "resources", "quizzes", "announcements", "notices"] },
+        "itemId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "deletedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["deleteId", "collection", "itemId", "deletedAt"]
     }
   },
   "firestore": {
@@ -420,6 +432,10 @@
       "schema": { "$ref": "#/entities/LessonItem" },
       "description": "Video lessons for Basic to Pro and One-Shot Revision."
     },
+    "/videos/{lessonId}": {
+      "schema": { "$ref": "#/entities/LessonItem" },
+      "description": "Mirrored video lessons collection for real-time public fetching."
+    },
     "/resources/{resourceId}": {
       "schema": { "$ref": "#/entities/ResourceItem" },
       "description": "PDF and downloadable materials per lesson."
@@ -456,9 +472,17 @@
       "schema": { "$ref": "#/entities/Announcement" },
       "description": "Platform announcements."
     },
+    "/notices/{announcementId}": {
+      "schema": { "$ref": "#/entities/Announcement" },
+      "description": "Mirrored public notices collection for real-time student and visitor fetching."
+    },
     "/appSettings/{settingId}": {
       "schema": { "$ref": "#/entities/AppSettings" },
       "description": "Dynamic platform theme, branding, homepage, and AI settings."
+    },
+    "/contentDeletes/{deleteId}": {
+      "schema": { "$ref": "#/entities/ContentDelete" },
+      "description": "Tracks deleted curriculum items for cross-device sync."
     },
     "/activityLogs/{logId}": {
       "schema": { "$ref": "#/entities/ActivityLog" },

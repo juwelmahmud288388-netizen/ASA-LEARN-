@@ -66,7 +66,7 @@ export function handleFirestoreError(
 
 export async function testFirestoreConnection(): Promise<{ ok: boolean; message?: string }> {
   try {
-    await getDocFromServer(doc(db, 'appSettings', 'global'));
+    await getDocFromServer(doc(db, 'test', 'connection'));
     return { ok: true };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);

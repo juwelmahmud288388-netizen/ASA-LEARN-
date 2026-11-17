@@ -11,6 +11,7 @@ import { getAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore, FieldValue } from 'firebase-admin/firestore';
 import { buildInitialSeedData, DEFAULT_APP_SETTINGS } from './src/lib/defaultCurriculum.ts';
 import { evaluateGamificationMilestones } from './src/lib/gamification.ts';
+import { buildNctbTutorSystemInstruction } from './src/lib/nctbKnowledgeBase.ts';
 
 dotenv.config();
 
@@ -743,6 +744,8 @@ function isAdminSdkCredentialError(err: unknown): boolean {
   );
 }
 
+let cachedAiSettings: { expiresAt: number; value: typeof DEFAULT_APP_SETTINGS.aiSettings } | null = null;
+
 async function getAiSettingsFromFirestore() {
   const overrides = loadContentOverrides();
   if (overrides.settings && typeof overrides.settings === 'object' && 'aiSettings' in overrides.settings) {
@@ -751,17 +754,52 @@ async function getAiSettingsFromFirestore() {
       ...(overrides.settings.aiSettings as Partial<typeof DEFAULT_APP_SETTINGS.aiSettings>),
     };
   }
+  if (cachedAiSettings && Date.now() < cachedAiSettings.expiresAt) {
+    return cachedAiSettings.value;
+  }
   try {
-    const snap = await adminDb.collection('appSettings').doc('global').get();
-    if (snap.exists) {
-      const data = snap.data();
-      if (data?.aiSettings) {
-        return { ...DEFAULT_APP_SETTINGS.aiSettings, ...data.aiSettings };
+    const projectId = String(firebaseConfig.projectId || 'gen-lang-client-0190472714');
+    const dbId = String(firebaseConfig.firestoreDatabaseId || 'ai-studio-3f625778-c379-433b-8b25-e84484ee7f83');
+    const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/${encodeURIComponent(dbId)}/documents/appSettings/global`;
+    const resp = await fetch(url, { signal: AbortSignal.timeout(1200) });
+    if (resp.ok) {
+      const docData = (await resp.json()) as {
+        fields?: {
+          aiSettings?: {
+            mapValue?: {
+              fields?: {
+                enabled?: { booleanValue?: boolean };
+                model?: { stringValue?: string };
+                systemInstructions?: { stringValue?: string };
+                dailyQuotaPerStudent?: { integerValue?: string; doubleValue?: number };
+              };
+            };
+          };
+        };
+      };
+      const aiFields = docData?.fields?.aiSettings?.mapValue?.fields;
+      if (aiFields) {
+        const merged = {
+          ...DEFAULT_APP_SETTINGS.aiSettings,
+          enabled: aiFields.enabled?.booleanValue !== false,
+          model: (aiFields.model?.stringValue === 'gemini-3.1-flash-lite'
+            ? 'gemini-3.1-flash-lite'
+            : 'gemini-4-hydrogen') as 'gemini-4-hydrogen' | 'gemini-3.1-flash-lite',
+          systemInstructions: aiFields.systemInstructions?.stringValue || DEFAULT_APP_SETTINGS.aiSettings.systemInstructions,
+          dailyQuotaPerStudent: Number(
+            aiFields.dailyQuotaPerStudent?.integerValue ??
+              aiFields.dailyQuotaPerStudent?.doubleValue ??
+              DEFAULT_APP_SETTINGS.aiSettings.dailyQuotaPerStudent
+          ),
+        };
+        cachedAiSettings = { expiresAt: Date.now() + 60_000, value: merged };
+        return merged;
       }
     }
   } catch {
-    // Use defaults if Firestore admin read isn't available yet
+    // Fall back swiftly to defaults if REST settings fetch times out
   }
+  cachedAiSettings = { expiresAt: Date.now() + 30_000, value: DEFAULT_APP_SETTINGS.aiSettings };
   return DEFAULT_APP_SETTINGS.aiSettings;
 }
 
@@ -1857,35 +1895,15 @@ async function startServer() {
               .join('\n')}`
           : '';
 
-      const modeHint =
-        mode === 'chapter_summary'
-          ? 'The student requested a quick summary of this lesson/topic. Give a brief, crisp bullet-point summary only.'
-          : '';
-
-      const coreTutorRules = [
-        'You are the "ASA LEARN AI Tutor" (Asha Learning AI Tutor), a smart, fast, and precise digital teacher active in the chat widget of the ASA LEARN website.',
-        'Direct & Concise (No Fluff): Answer ONLY what the student asks. Never provide unsolicited extra information, unnecessary background essays, or random PDF links unless explicitly requested. Keep explanations crisp and straight to the point.',
-        'Conversational Continuity: Remember earlier messages in the current chat session so follow-up questions work naturally without asking the student to repeat themselves.',
-        'High Speed & Efficiency: Structure responses to be fast, brief, and immediately readable. Avoid long introductory or concluding remarks.',
-        'All-Subject Support: Handle questions across math, science, history, languages, or video contexts accurately.',
-        'Teacher Persona: Maintain an encouraging, patient teacher tone, breaking down concepts briefly with core logic if needed.',
-        'Language & Formatting: Reply in fluent, polite Bengali. Use clean Markdown, bold text, and bullet points only when necessary for brevity.',
-      ].join('\n');
-
-      const systemInstruction = [
-        coreTutorRules,
-        aiSettings.systemInstructions && !aiSettings.systemInstructions.includes('Summary & Clear Breakdown')
-          ? `Additional Admin Guidance: ${aiSettings.systemInstructions}`
-          : '',
-        classContext ? `Student Class: ${classContext}.` : '',
-        subjectContext ? `Subject Focus: ${subjectContext}.` : '',
-        lessonContext ? `Current Lesson / Video Context: ${lessonContext}.` : '',
-        `Interface Language: ${language === 'bn' ? 'Bengali' : 'English (reply in fluent, polite Bengali unless the student asks specifically for English)'}.`,
-        modeHint,
+      const systemInstruction = buildNctbTutorSystemInstruction({
+        classContext: String(classContext || ''),
+        subjectContext: String(subjectContext || ''),
+        lessonContext: String(lessonContext || ''),
+        mode: String(mode || 'bangla_tutor'),
+        language: String(language || 'bn'),
         availableNotesContext,
-      ]
-        .filter(Boolean)
-        .join('\n');
+        adminGuidance: aiSettings.systemInstructions,
+      });
 
       const normalizedHistory = Array.isArray(history)
         ? history
@@ -1941,9 +1959,9 @@ async function startServer() {
       const safeCount = Math.min(Math.max(Number(count) || 4, 3), 8);
 
       const response = await generateWithRetry('gemini-4-hydrogen', {
-        contents: `Generate ${safeCount} multiple-choice practice questions for ${classTitle}, Subject: ${subjectTitle}, Topic: ${topicTitle}. Language: ${
+        contents: `Generate ${safeCount} Bangladesh NCTB-aligned Board-standard multiple-choice practice questions for ${classTitle}, Subject: ${subjectTitle}, Topic: ${topicTitle}. Language: ${
           language === 'bn' ? 'Bangla (বাংলা)' : 'English'
-        }. Make questions accurate, age-appropriate, and educational with 4 options and a clear explanation.`,
+        }. Ensure formulas, units, terminology, and textbook rules strictly match NCTB Classes 6–10 textbooks, with 4 plausible options and a concise explanation.`,
         config: {
           responseMimeType: 'application/json',
           responseSchema: {

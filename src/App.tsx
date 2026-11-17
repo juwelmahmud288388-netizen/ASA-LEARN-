@@ -75,28 +75,25 @@ const RouterView: React.FC = () => {
 };
 
 const AppShell: React.FC = () => {
-  const { route, authLoading, curriculumLoading, appSettings, language } = useApp();
-  const [minDelayDone, setMinDelayDone] = useState(false);
+  const { route, authLoading, curriculumLoading, appSettings } = useApp();
+  const [videoDone, setVideoDone] = useState(false);
   const [failsafeDone, setFailsafeDone] = useState(false);
 
   useEffect(() => {
-    const t1 = window.setTimeout(() => setMinDelayDone(true), 2750);
-    const t2 = window.setTimeout(() => setFailsafeDone(true), 4100);
+    const failsafeTimer = window.setTimeout(() => setFailsafeDone(true), 5500);
     return () => {
-      window.clearTimeout(t1);
-      window.clearTimeout(t2);
+      window.clearTimeout(failsafeTimer);
     };
   }, []);
 
-  const showSplash = !failsafeDone && (!minDelayDone || authLoading || curriculumLoading);
+  const showSplash = !failsafeDone && (!videoDone || authLoading || curriculumLoading);
 
   return (
     <>
       <Logo3DLoader
         visible={showSplash}
-        logoUrl={appSettings.branding.logoUrl}
         siteName={appSettings.branding.siteName}
-        language={language}
+        onVideoComplete={() => setVideoDone(true)}
       />
       <div className="min-h-screen overflow-x-clip">
         <Navbar />

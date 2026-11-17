@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   onAuthStateChanged,
   signInWithCustomToken,
@@ -14,11 +14,9 @@ import {
   getDoc,
   getDocs,
   onSnapshot,
-  query,
   serverTimestamp,
   setDoc,
   updateDoc,
-  where,
   writeBatch,
 } from 'firebase/firestore';
 import {
@@ -387,6 +385,186 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return adminSessionActive || hasFirestoreAdminAuth;
   }, [adminSessionActive, hasFirestoreAdminAuth]);
 
+  const apiBaseRef = useRef<{
+    settings?: AppSettings;
+    categories: CategoryItem[];
+    classes: ClassItem[];
+    subjects: SubjectItem[];
+    chapters: ChapterItem[];
+    topics: TopicItem[];
+    lessons: LessonItem[];
+    resources: ResourceItem[];
+    quizzes: QuizItem[];
+    announcements: Announcement[];
+  }>({
+    categories: initialSeed.categories,
+    classes: initialSeed.classes,
+    subjects: initialSeed.subjects,
+    chapters: initialSeed.chapters,
+    topics: initialSeed.topics,
+    lessons: initialSeed.lessons,
+    resources: initialSeed.resources,
+    quizzes: initialSeed.quizzes,
+    announcements: initialSeed.announcements,
+  });
+
+  const firestoreDocsRef = useRef<{
+    settings?: Partial<AppSettings>;
+    categories: CategoryItem[];
+    classes: ClassItem[];
+    subjects: SubjectItem[];
+    chapters: ChapterItem[];
+    topics: TopicItem[];
+    lessons: LessonItem[];
+    videos: LessonItem[];
+    resources: ResourceItem[];
+    quizzes: QuizItem[];
+    announcements: Announcement[];
+    notices: Announcement[];
+  }>({
+    categories: [],
+    classes: [],
+    subjects: [],
+    chapters: [],
+    topics: [],
+    lessons: [],
+    videos: [],
+    resources: [],
+    quizzes: [],
+    announcements: [],
+    notices: [],
+  });
+
+  const deletedIdsRef = useRef<Record<string, Set<string>>>({});
+
+  const applyMergedCurriculum = useCallback(() => {
+    const apiBase = apiBaseRef.current;
+    const fsDocs = firestoreDocsRef.current;
+    const delMap = deletedIdsRef.current;
+
+    const mergeById = <T extends object>(
+      seedItems: T[],
+      baseItems: T[],
+      cloudPrimary: T[],
+      cloudMirror: T[],
+      idField: keyof T,
+      delCols: string[]
+    ): T[] => {
+      const deleted = new Set<string>();
+      for (const dc of delCols) {
+        delMap[dc]?.forEach((id) => deleted.add(id));
+      }
+      const map = new Map<string, T>();
+      for (const item of seedItems) {
+        const id = String(item[idField] || '');
+        if (id && !deleted.has(id)) map.set(id, item);
+      }
+      for (const item of baseItems) {
+        const id = String(item[idField] || '');
+        if (id && !deleted.has(id)) map.set(id, item);
+      }
+      for (const item of cloudPrimary) {
+        const id = String(item[idField] || '');
+        if (id && !deleted.has(id)) {
+          const prev = map.get(id) || ({} as T);
+          map.set(id, { ...prev, ...item });
+        }
+      }
+      for (const item of cloudMirror) {
+        const id = String(item[idField] || '');
+        if (id && !deleted.has(id)) {
+          const prev = map.get(id) || ({} as T);
+          map.set(id, { ...prev, ...item });
+        }
+      }
+      return Array.from(map.values());
+    };
+
+    if (apiBase.settings || fsDocs.settings) {
+      setAppSettings({
+        ...DEFAULT_APP_SETTINGS,
+        ...(apiBase.settings || {}),
+        ...(fsDocs.settings || {}),
+        branding: {
+          ...DEFAULT_APP_SETTINGS.branding,
+          ...(apiBase.settings?.branding || {}),
+          ...(fsDocs.settings?.branding || {}),
+        },
+        theme: {
+          ...DEFAULT_APP_SETTINGS.theme,
+          ...(apiBase.settings?.theme || {}),
+          ...(fsDocs.settings?.theme || {}),
+        },
+        languageSettings: {
+          ...DEFAULT_APP_SETTINGS.languageSettings,
+          ...(apiBase.settings?.languageSettings || {}),
+          ...(fsDocs.settings?.languageSettings || {}),
+        },
+        homepageSettings: {
+          ...DEFAULT_APP_SETTINGS.homepageSettings,
+          ...(apiBase.settings?.homepageSettings || {}),
+          ...(fsDocs.settings?.homepageSettings || {}),
+        },
+        aiSettings: {
+          ...DEFAULT_APP_SETTINGS.aiSettings,
+          ...(apiBase.settings?.aiSettings || {}),
+          ...(fsDocs.settings?.aiSettings || {}),
+        },
+        featureFlags: {
+          ...DEFAULT_APP_SETTINGS.featureFlags,
+          ...(apiBase.settings?.featureFlags || {}),
+          ...(fsDocs.settings?.featureFlags || {}),
+        },
+      });
+    }
+
+    setCategories(
+      mergeById(initialSeed.categories, apiBase.categories, fsDocs.categories, [], 'categoryId', ['categories'])
+        .filter((c) => isAdmin || c.status === 'published')
+        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
+    );
+    setClasses(
+      mergeById(initialSeed.classes, apiBase.classes, fsDocs.classes, [], 'classId', ['classes'])
+        .filter((c) => isAdmin || c.status === 'published')
+        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
+    );
+    setSubjects(
+      mergeById(initialSeed.subjects, apiBase.subjects, fsDocs.subjects, [], 'subjectId', ['subjects'])
+        .filter((s) => isAdmin || s.status === 'published')
+        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
+    );
+    setChapters(
+      mergeById(initialSeed.chapters, apiBase.chapters, fsDocs.chapters, [], 'chapterId', ['chapters'])
+        .filter((ch) => isAdmin || ch.status === 'published')
+        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
+    );
+    setTopics(
+      mergeById(initialSeed.topics, apiBase.topics, fsDocs.topics, [], 'topicId', ['topics'])
+        .filter((tp) => isAdmin || tp.status === 'published')
+        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
+    );
+    setLessons(
+      mergeById(initialSeed.lessons, apiBase.lessons, fsDocs.lessons, fsDocs.videos, 'lessonId', ['lessons', 'videos'])
+        .filter((l) => isAdmin || l.status === 'published')
+        .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
+    );
+    setResources(
+      mergeById(initialSeed.resources, apiBase.resources, fsDocs.resources, [], 'resourceId', ['resources'])
+    );
+    setQuizzes(
+      mergeById(initialSeed.quizzes, apiBase.quizzes, fsDocs.quizzes, [], 'quizId', ['quizzes'])
+        .filter((q) => isAdmin || q.status === 'published')
+    );
+    setAnnouncements(
+      mergeById(initialSeed.announcements, apiBase.announcements, fsDocs.announcements, fsDocs.notices, 'announcementId', ['announcements', 'notices'])
+        .filter((a) => isAdmin || a.published !== false)
+    );
+  }, [initialSeed, isAdmin]);
+
+  useEffect(() => {
+    applyMergedCurriculum();
+  }, [applyMergedCurriculum]);
+
   const refreshCurriculum = useCallback(async () => {
     try {
       const res = await safeJsonFetch<{
@@ -405,77 +583,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         headers: getAdminAuthHeaders(),
       });
 
-      const data =
-        res.ok && res.data ? res.data : localGetMergedCurriculum(isAdmin);
+      const localFallback = localGetMergedCurriculum(true);
+      const data = res.ok && res.data ? res.data : localFallback;
 
-      if (data.settings) setAppSettings(data.settings);
-      if (Array.isArray(data.categories)) {
-        setCategories(
-          data.categories
-            .filter((c: CategoryItem) => isAdmin || c.status === 'published')
-            .sort((a: CategoryItem, b: CategoryItem) => Number(a.order || 0) - Number(b.order || 0))
-        );
-      }
-      if (Array.isArray(data.classes)) {
-        setClasses(
-          data.classes
-            .filter((c: ClassItem) => isAdmin || c.status === 'published')
-            .sort((a: ClassItem, b: ClassItem) => Number(a.order || 0) - Number(b.order || 0))
-        );
-      }
-      if (Array.isArray(data.subjects)) {
-        setSubjects(
-          data.subjects
-            .filter((s: SubjectItem) => isAdmin || s.status === 'published')
-            .sort((a: SubjectItem, b: SubjectItem) => Number(a.order || 0) - Number(b.order || 0))
-        );
-      }
-      if (Array.isArray(data.chapters)) {
-        setChapters(
-          data.chapters
-            .filter((ch: ChapterItem) => isAdmin || ch.status === 'published')
-            .sort((a: ChapterItem, b: ChapterItem) => Number(a.order || 0) - Number(b.order || 0))
-        );
-      }
-      if (Array.isArray(data.topics)) {
-        setTopics(
-          data.topics
-            .filter((tp: TopicItem) => isAdmin || tp.status === 'published')
-            .sort((a: TopicItem, b: TopicItem) => Number(a.order || 0) - Number(b.order || 0))
-        );
-      }
-      if (Array.isArray(data.lessons)) {
-        setLessons(
-          data.lessons
-            .filter((l: LessonItem) => isAdmin || l.status === 'published')
-            .sort((a: LessonItem, b: LessonItem) => Number(a.order || 0) - Number(b.order || 0))
-        );
-      }
-      if (Array.isArray(data.resources)) setResources(data.resources);
-      if (Array.isArray(data.quizzes)) {
-        setQuizzes(data.quizzes.filter((q: QuizItem) => isAdmin || q.status === 'published'));
-      }
-      if (Array.isArray(data.announcements)) {
-        setAnnouncements(data.announcements.filter((a: Announcement) => isAdmin || a.published));
-      }
+      apiBaseRef.current = {
+        settings: data.settings || localFallback.settings,
+        categories: Array.isArray(data.categories) ? data.categories : localFallback.categories,
+        classes: Array.isArray(data.classes) ? data.classes : localFallback.classes,
+        subjects: Array.isArray(data.subjects) ? data.subjects : localFallback.subjects,
+        chapters: Array.isArray(data.chapters) ? data.chapters : localFallback.chapters,
+        topics: Array.isArray(data.topics) ? data.topics : localFallback.topics,
+        lessons: Array.isArray(data.lessons) ? data.lessons : localFallback.lessons,
+        resources: Array.isArray(data.resources) ? data.resources : localFallback.resources,
+        quizzes: Array.isArray(data.quizzes) ? data.quizzes : localFallback.quizzes,
+        announcements: Array.isArray(data.announcements) ? data.announcements : localFallback.announcements,
+      };
+      applyMergedCurriculum();
       setNeedsAdminSeed(false);
     } catch (err) {
-      console.warn('Could not refresh curriculum cleanly, using built-in curriculum:', err);
-      const localData = localGetMergedCurriculum(isAdmin);
-      if (localData.settings) setAppSettings(localData.settings);
-      setCategories(localData.categories);
-      setClasses(localData.classes);
-      setSubjects(localData.subjects);
-      setChapters(localData.chapters);
-      setTopics(localData.topics);
-      setLessons(localData.lessons);
-      setResources(localData.resources);
-      setQuizzes(localData.quizzes);
-      setAnnouncements(localData.announcements);
+      console.warn('Could not refresh API curriculum cleanly, preserving Firestore & built-in curriculum:', err);
+      const localData = localGetMergedCurriculum(true);
+      apiBaseRef.current = {
+        settings: localData.settings,
+        categories: localData.categories,
+        classes: localData.classes,
+        subjects: localData.subjects,
+        chapters: localData.chapters,
+        topics: localData.topics,
+        lessons: localData.lessons,
+        resources: localData.resources,
+        quizzes: localData.quizzes,
+        announcements: localData.announcements,
+      };
+      applyMergedCurriculum();
     } finally {
       setCurriculumLoading(false);
     }
-  }, [isAdmin]);
+  }, [applyMergedCurriculum]);
 
   useEffect(() => {
     void refreshCurriculum();
@@ -623,12 +767,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => unsub();
   }, []);
 
-  // Optional Firestore Real-time Sync (only overrides local state when Firestore actually has docs)
+  // Real-time Public & Admin Firestore Cloud Sync (works for all visitors without Firebase Auth)
   useEffect(() => {
-    const makeQuery = (colName: string) =>
-      hasFirestoreAdminAuth ? collection(db, colName) : query(collection(db, colName), where('status', '==', 'published'));
-
     const unsubs: Array<() => void> = [];
+    const safeReport = (err: unknown, path: string) => {
+      try {
+        handleFirestoreError(err, OperationType.GET, path);
+      } catch {
+        // Logged structured diagnostic without crashing UI
+      }
+    };
+
     unsubs.push(
       onSnapshot(
         doc(db, 'appSettings', 'global'),
@@ -636,136 +785,89 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setFirebaseConnected(true);
           if (snap.exists()) {
             setFirestoreStats((prev) => ({ ...prev, settingsSynced: true }));
-            const data = snap.data() as Partial<AppSettings>;
-            setAppSettings((prev) => ({
-              ...prev,
-              ...data,
-              branding: { ...prev.branding, ...(data.branding || {}) },
-              theme: { ...prev.theme, ...(data.theme || {}) },
-              languageSettings: { ...prev.languageSettings, ...(data.languageSettings || {}) },
-              homepageSettings: { ...prev.homepageSettings, ...(data.homepageSettings || {}) },
-              aiSettings: { ...prev.aiSettings, ...(data.aiSettings || {}) },
-              featureFlags: { ...prev.featureFlags, ...(data.featureFlags || {}) },
-            }));
+            firestoreDocsRef.current.settings = snap.data() as Partial<AppSettings>;
+            applyMergedCurriculum();
           } else {
             setFirestoreStats((prev) => ({ ...prev, settingsSynced: false }));
           }
         },
-        () => {}
+        (err) => safeReport(err, 'appSettings/global')
       )
     );
+
     unsubs.push(
       onSnapshot(
-        makeQuery('categories'),
+        collection(db, 'contentDeletes'),
         (snap) => {
-          if (snap.docs.length > 0) {
-            setCategories(snap.docs.map((d) => d.data() as CategoryItem).sort((a, b) => a.order - b.order));
-          }
+          setFirebaseConnected(true);
+          const nextDeletes: Record<string, Set<string>> = {};
+          snap.docs.forEach((d) => {
+            const data = d.data() as { collection?: string; itemId?: string };
+            if (data.collection && data.itemId) {
+              if (!nextDeletes[data.collection]) nextDeletes[data.collection] = new Set();
+              nextDeletes[data.collection]!.add(String(data.itemId));
+            }
+          });
+          deletedIdsRef.current = nextDeletes;
+          applyMergedCurriculum();
         },
-        () => {}
+        (err) => safeReport(err, 'contentDeletes')
       )
     );
-    unsubs.push(
-      onSnapshot(
-        makeQuery('classes'),
-        (snap) => {
-          setFirestoreStats((prev) => ({ ...prev, classes: snap.docs.length }));
-          if (snap.docs.length > 0) {
-            setClasses(snap.docs.map((d) => d.data() as ClassItem).sort((a, b) => a.order - b.order));
-          }
-        },
-        () => {}
-      )
-    );
-    unsubs.push(
-      onSnapshot(
-        makeQuery('subjects'),
-        (snap) => {
-          setFirestoreStats((prev) => ({ ...prev, subjects: snap.docs.length }));
-          if (snap.docs.length > 0) {
-            setSubjects(snap.docs.map((d) => d.data() as SubjectItem).sort((a, b) => a.order - b.order));
-          }
-        },
-        () => {}
-      )
-    );
-    unsubs.push(
-      onSnapshot(
-        makeQuery('chapters'),
-        (snap) => {
-          setFirestoreStats((prev) => ({ ...prev, chapters: snap.docs.length }));
-          if (snap.docs.length > 0) {
-            setChapters(snap.docs.map((d) => d.data() as ChapterItem).sort((a, b) => a.order - b.order));
-          }
-        },
-        () => {}
-      )
-    );
-    unsubs.push(
-      onSnapshot(
-        makeQuery('topics'),
-        (snap) => {
-          if (snap.docs.length > 0) {
-            setTopics(snap.docs.map((d) => d.data() as TopicItem).sort((a, b) => a.order - b.order));
-          }
-        },
-        () => {}
-      )
-    );
-    unsubs.push(
-      onSnapshot(
-        makeQuery('lessons'),
-        (snap) => {
-          setFirestoreStats((prev) => ({ ...prev, lessons: snap.docs.length }));
-          if (snap.docs.length > 0) {
-            setLessons(snap.docs.map((d) => d.data() as LessonItem).sort((a, b) => a.order - b.order));
-          }
-        },
-        () => {}
-      )
-    );
-    unsubs.push(
-      onSnapshot(
-        collection(db, 'resources'),
-        (snap) => {
-          setFirestoreStats((prev) => ({ ...prev, resources: snap.docs.length }));
-          if (snap.docs.length > 0) {
-            setResources(snap.docs.map((d) => d.data() as ResourceItem));
-          }
-        },
-        () => {}
-      )
-    );
-    unsubs.push(
-      onSnapshot(
-        makeQuery('quizzes'),
-        (snap) => {
-          setFirestoreStats((prev) => ({ ...prev, quizzes: snap.docs.length }));
-          if (snap.docs.length > 0) {
-            setQuizzes(snap.docs.map((d) => d.data() as QuizItem));
-          }
-        },
-        () => {}
-      )
-    );
-    unsubs.push(
-      onSnapshot(
-        hasFirestoreAdminAuth
-          ? collection(db, 'announcements')
-          : query(collection(db, 'announcements'), where('published', '==', true)),
-        (snap) => {
-          setFirestoreStats((prev) => ({ ...prev, announcements: snap.docs.length }));
-          if (snap.docs.length > 0) {
-            setAnnouncements(snap.docs.map((d) => d.data() as Announcement));
-          }
-        },
-        () => {}
-      )
-    );
+
+    const watchCollection = <T extends object>(
+      colName: string,
+      key: keyof typeof firestoreDocsRef.current,
+      statKey?: keyof FirestoreSyncStats
+    ) => {
+      unsubs.push(
+        onSnapshot(
+          collection(db, colName),
+          (snap) => {
+            setFirebaseConnected(true);
+            (firestoreDocsRef.current[key] as T[]) = snap.docs.map((d) => d.data() as T);
+            if (statKey && statKey !== 'settingsSynced') {
+              setFirestoreStats((prev) => {
+                if (colName === 'lessons' || colName === 'videos') {
+                  const uniqueLessons = new Set<string>([
+                    ...firestoreDocsRef.current.lessons.map((l) => l.lessonId),
+                    ...firestoreDocsRef.current.videos.map((l) => l.lessonId),
+                  ]);
+                  return { ...prev, lessons: uniqueLessons.size };
+                }
+                if (colName === 'announcements' || colName === 'notices') {
+                  const uniqueNotices = new Set<string>([
+                    ...firestoreDocsRef.current.announcements.map((a) => a.announcementId),
+                    ...firestoreDocsRef.current.notices.map((a) => a.announcementId),
+                  ]);
+                  return { ...prev, announcements: uniqueNotices.size };
+                }
+                return { ...prev, [statKey]: snap.docs.length };
+              });
+            }
+            applyMergedCurriculum();
+          },
+          (err) => safeReport(err, colName)
+        )
+      );
+    };
+
+    watchCollection<CategoryItem>('categories', 'categories');
+    watchCollection<ClassItem>('classes', 'classes', 'classes');
+    watchCollection<SubjectItem>('subjects', 'subjects', 'subjects');
+    watchCollection<ChapterItem>('chapters', 'chapters', 'chapters');
+    watchCollection<TopicItem>('topics', 'topics');
+    watchCollection<LessonItem>('lessons', 'lessons', 'lessons');
+    watchCollection<LessonItem>('videos', 'videos', 'lessons');
+    watchCollection<ResourceItem>('resources', 'resources', 'resources');
+    watchCollection<QuizItem>('quizzes', 'quizzes', 'quizzes');
+    watchCollection<Announcement>('announcements', 'announcements', 'announcements');
+    watchCollection<Announcement>('notices', 'notices', 'announcements');
+
     return () => {
       for (const u of unsubs) u();
     };
-  }, [hasFirestoreAdminAuth]);
+  }, [applyMergedCurriculum]);
 
   const FIRESTORE_ALLOWED_FIELDS: Record<string, string[]> = {
     categories: ['categoryId', 'title', 'titleBn', 'description', 'descriptionBn', 'icon', 'order', 'status'],
@@ -778,96 +880,251 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       'title', 'titleBn', 'youtubeUrl', 'thumbnailUrl', 'description', 'descriptionBn',
       'objectives', 'difficulty', 'durationMinutes', 'featured', 'order', 'status',
     ],
+    videos: [
+      'lessonId', 'classId', 'subjectId', 'chapterId', 'topicId', 'category',
+      'title', 'titleBn', 'youtubeUrl', 'thumbnailUrl', 'description', 'descriptionBn',
+      'objectives', 'difficulty', 'durationMinutes', 'featured', 'order', 'status',
+    ],
     resources: ['resourceId', 'lessonId', 'title', 'titleBn', 'fileUrl', 'fileType', 'downloadable'],
     quizzes: ['quizId', 'lessonId', 'title', 'questions', 'creativeQuestions', 'status'],
     announcements: ['announcementId', 'title', 'titleBn', 'content', 'contentBn', 'noticeLevel', 'imageUrl', 'videoUrl', 'targetClasses', 'published'],
+    notices: ['announcementId', 'title', 'titleBn', 'content', 'contentBn', 'noticeLevel', 'imageUrl', 'videoUrl', 'targetClasses', 'published'],
+    appSettings: ['settingId', 'branding', 'theme', 'languageSettings', 'homepageSettings', 'aiSettings', 'featureFlags'],
+  };
+
+  const toSafeId = (val: unknown, fallback: string) => {
+    const cleaned = String(val || '')
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]/g, '_');
+    return (cleaned || fallback).slice(0, 128);
   };
 
   const sanitizeForFirestore = (colName: string, obj: Record<string, unknown>) => {
+    const canonicalCol = colName === 'videos' ? 'lessons' : colName === 'notices' ? 'announcements' : colName;
     const out: Record<string, unknown> = {};
-    const allowed = FIRESTORE_ALLOWED_FIELDS[colName];
+    const allowed = FIRESTORE_ALLOWED_FIELDS[canonicalCol];
     for (const [k, v] of Object.entries(obj)) {
       if (v === undefined || k === 'createdAt' || k === 'updatedAt') continue;
       if (allowed && !allowed.includes(k)) continue;
       out[k] = v;
     }
     if ('order' in out) {
-      out.order = Math.max(0, Math.round(Number(out.order || 0)));
+      out.order = Math.min(10000, Math.max(0, Math.round(Number(out.order || 0))));
     }
-    if (colName === 'announcements') {
+    if (canonicalCol === 'classes') {
+      out.classId = toSafeId(out.classId, 'class-custom');
+      out.title = String(out.title || 'Class').trim().slice(0, 100) || 'Class';
+      out.titleBn = (String(out.titleBn || '').trim() || String(out.title)).slice(0, 100);
+      if (typeof out.description === 'string') out.description = out.description.slice(0, 500);
+      if (typeof out.descriptionBn === 'string') out.descriptionBn = out.descriptionBn.slice(0, 500);
+      out.order = Math.min(10000, Math.max(0, Math.round(Number(out.order ?? 1))));
+      out.status = out.status === 'draft' ? 'draft' : 'published';
+    } else if (canonicalCol === 'subjects') {
+      out.subjectId = toSafeId(out.subjectId, 'subj-custom');
+      out.classId = toSafeId(out.classId, 'class-9');
+      out.title = String(out.title || 'Subject').trim().slice(0, 120) || 'Subject';
+      out.titleBn = (String(out.titleBn || '').trim() || String(out.title)).slice(0, 120);
+      if (typeof out.description === 'string') out.description = out.description.slice(0, 500);
+      if (typeof out.descriptionBn === 'string') out.descriptionBn = out.descriptionBn.slice(0, 500);
+      if (Array.isArray(out.groups)) out.groups = out.groups.map((g) => String(g)).slice(0, 5);
+      if ('isOptional' in out) out.isOptional = Boolean(out.isOptional);
+      out.order = Math.min(10000, Math.max(0, Math.round(Number(out.order ?? 1))));
+      out.status = out.status === 'draft' ? 'draft' : 'published';
+    } else if (canonicalCol === 'chapters') {
+      out.chapterId = toSafeId(out.chapterId, 'chap-custom');
+      out.classId = toSafeId(out.classId, 'class-9');
+      out.subjectId = toSafeId(out.subjectId, 'general');
+      out.title = String(out.title || 'Chapter').trim().slice(0, 160) || 'Chapter';
+      out.titleBn = (String(out.titleBn || '').trim() || String(out.title)).slice(0, 160);
+      if (typeof out.description === 'string') out.description = out.description.slice(0, 600);
+      if (typeof out.descriptionBn === 'string') out.descriptionBn = out.descriptionBn.slice(0, 600);
+      out.order = Math.min(10000, Math.max(0, Math.round(Number(out.order ?? 1))));
+      out.status = out.status === 'draft' ? 'draft' : 'published';
+    } else if (canonicalCol === 'topics') {
+      out.topicId = toSafeId(out.topicId, 'topic-custom');
+      out.classId = toSafeId(out.classId, 'class-9');
+      out.subjectId = toSafeId(out.subjectId, 'general');
+      out.chapterId = toSafeId(out.chapterId, 'general');
+      out.title = String(out.title || 'Topic').trim().slice(0, 160) || 'Topic';
+      out.titleBn = (String(out.titleBn || '').trim() || String(out.title)).slice(0, 160);
+      if (typeof out.description === 'string') out.description = out.description.slice(0, 600);
+      if (typeof out.descriptionBn === 'string') out.descriptionBn = out.descriptionBn.slice(0, 600);
+      out.order = Math.min(10000, Math.max(0, Math.round(Number(out.order ?? 1))));
+      out.status = out.status === 'draft' ? 'draft' : 'published';
+    } else if (canonicalCol === 'categories') {
+      out.categoryId = toSafeId(out.categoryId, 'cat-custom');
+      out.title = String(out.title || 'Category').trim().slice(0, 100) || 'Category';
+      out.titleBn = (String(out.titleBn || '').trim() || String(out.title)).slice(0, 100);
+      if (typeof out.description === 'string') out.description = out.description.slice(0, 500);
+      if (typeof out.descriptionBn === 'string') out.descriptionBn = out.descriptionBn.slice(0, 500);
+      if (typeof out.icon === 'string') out.icon = out.icon.slice(0, 40);
+      out.order = Math.min(10000, Math.max(0, Math.round(Number(out.order ?? 1))));
+      out.status = out.status === 'draft' ? 'draft' : 'published';
+    } else if (canonicalCol === 'announcements') {
+      out.announcementId = toSafeId(out.announcementId, 'ann-custom');
+      out.title = String(out.title || 'Notice').trim().slice(0, 200) || 'Notice';
+      out.titleBn = (String(out.titleBn || '').trim() || String(out.title)).slice(0, 200);
+      out.content = (String(out.content || '').trim() || String(out.title)).slice(0, 2000);
+      out.contentBn = (String(out.contentBn || '').trim() || String(out.content)).slice(0, 2000);
       const lvl = String(out.noticeLevel || '').trim();
       out.noticeLevel = lvl === 'emergency' || lvl === 'warning' ? lvl : 'info';
       if (typeof out.imageUrl === 'string' && !out.imageUrl.trim()) delete out.imageUrl;
+      else if (typeof out.imageUrl === 'string') out.imageUrl = out.imageUrl.trim().slice(0, 1000);
       if (typeof out.videoUrl === 'string' && !out.videoUrl.trim()) delete out.videoUrl;
-    }
-    if (colName === 'lessons') {
-      out.chapterId = String(out.chapterId || '').trim() || 'general';
-      out.topicId = String(out.topicId || '').trim() || 'general';
-      out.category = String(out.category || '').trim() || 'basic_to_pro';
-      out.titleBn = String(out.titleBn || '').trim() || String(out.title || '');
-      out.difficulty = out.difficulty || 'intermediate';
-      out.status = out.status || 'published';
+      else if (typeof out.videoUrl === 'string') out.videoUrl = out.videoUrl.trim().slice(0, 1000);
+      out.targetClasses = Array.isArray(out.targetClasses)
+        ? out.targetClasses.map((c) => String(c)).filter(Boolean).slice(0, 10)
+        : ['all'];
+      if ((out.targetClasses as string[]).length === 0) out.targetClasses = ['all'];
+      out.published = out.published !== false;
+    } else if (canonicalCol === 'lessons') {
+      out.lessonId = toSafeId(out.lessonId, 'les-custom');
+      out.classId = toSafeId(out.classId, 'class-9');
+      out.subjectId = toSafeId(out.subjectId, 'general');
+      out.chapterId = toSafeId(out.chapterId, 'general');
+      out.topicId = toSafeId(out.topicId, 'general');
+      out.category = toSafeId(out.category, 'basic_to_pro');
+      out.title = String(out.title || 'Lesson').trim().slice(0, 200) || 'Lesson';
+      out.titleBn = (String(out.titleBn || '').trim() || String(out.title)).slice(0, 200);
+      if (typeof out.youtubeUrl === 'string') out.youtubeUrl = out.youtubeUrl.trim().slice(0, 500);
+      if (typeof out.thumbnailUrl === 'string') out.thumbnailUrl = out.thumbnailUrl.trim().slice(0, 500);
+      if (typeof out.description === 'string') out.description = out.description.slice(0, 2000);
+      if (typeof out.descriptionBn === 'string') out.descriptionBn = out.descriptionBn.slice(0, 2000);
+      out.difficulty =
+        out.difficulty === 'beginner' || out.difficulty === 'advanced' ? out.difficulty : 'intermediate';
+      out.status = out.status === 'draft' ? 'draft' : 'published';
+      out.order = Math.min(10000, Math.max(0, Math.round(Number(out.order ?? 1))));
       if ('durationMinutes' in out) {
         out.durationMinutes = Math.min(600, Math.max(0, Math.round(Number(out.durationMinutes || 0))));
       }
+      if ('featured' in out) out.featured = Boolean(out.featured);
       if (Array.isArray(out.objectives)) {
         out.objectives = out.objectives.map((item) => String(item)).slice(0, 15);
       }
-    }
-    if (colName === 'subjects' && Array.isArray(out.groups)) {
-      out.groups = out.groups.map((g) => String(g)).slice(0, 5);
-    }
-    if (colName === 'quizzes') {
-      if (Array.isArray(out.questions)) out.questions = out.questions.slice(0, 20);
-      if (Array.isArray(out.creativeQuestions)) out.creativeQuestions = out.creativeQuestions.slice(0, 10);
+    } else if (canonicalCol === 'resources') {
+      out.resourceId = toSafeId(out.resourceId, 'res-custom');
+      out.lessonId = toSafeId(out.lessonId, 'general');
+      out.title = String(out.title || 'Study Material').trim().slice(0, 200) || 'Study Material';
+      if (typeof out.titleBn === 'string') out.titleBn = out.titleBn.slice(0, 200);
+      out.fileUrl = String(out.fileUrl || '#').trim().slice(0, 1000) || '#';
+      out.fileType = String(out.fileType || 'PDF').trim().slice(0, 40) || 'PDF';
+      out.downloadable = out.downloadable !== false;
+    } else if (canonicalCol === 'quizzes') {
+      out.quizId = toSafeId(out.quizId, 'quiz-custom');
+      out.lessonId = toSafeId(out.lessonId, 'general');
+      out.title = String(out.title || 'Quiz').trim().slice(0, 200) || 'Quiz';
+      out.questions = Array.isArray(out.questions)
+        ? out.questions.filter((q) => q && typeof q === 'object').slice(0, 20)
+        : [];
+      if (Array.isArray(out.creativeQuestions)) {
+        out.creativeQuestions = out.creativeQuestions.filter((q) => q && typeof q === 'object').slice(0, 10);
+      }
+      out.status = out.status === 'draft' ? 'draft' : 'published';
+    } else if (canonicalCol === 'appSettings') {
+      out.settingId = 'global';
+      out.branding = out.branding && typeof out.branding === 'object' ? out.branding : DEFAULT_APP_SETTINGS.branding;
+      out.theme = out.theme && typeof out.theme === 'object' ? out.theme : DEFAULT_APP_SETTINGS.theme;
+      out.homepageSettings =
+        out.homepageSettings && typeof out.homepageSettings === 'object'
+          ? out.homepageSettings
+          : DEFAULT_APP_SETTINGS.homepageSettings;
     }
     return out;
   };
 
+  const syncSingleCollectionDoc = async (colName: string, docId: string, payload: Record<string, unknown>) => {
+    const safeId = toSafeId(docId, 'item');
+    const ref = doc(db, colName, safeId);
+    const hasUpdatedAt = colName !== 'resources' && colName !== 'announcements' && colName !== 'notices';
+    const existingSnap = await getDoc(ref);
+    const existingCreatedAt = existingSnap.exists() ? existingSnap.data()?.createdAt : undefined;
+    const hasValidTimestampCreatedAt =
+      Boolean(existingCreatedAt) &&
+      typeof existingCreatedAt === 'object' &&
+      'toMillis' in (existingCreatedAt as Record<string, unknown>);
+
+    if (existingSnap.exists() && hasValidTimestampCreatedAt) {
+      await setDoc(
+        ref,
+        hasUpdatedAt
+          ? { ...payload, createdAt: existingCreatedAt, updatedAt: serverTimestamp() }
+          : { ...payload, createdAt: existingCreatedAt }
+      );
+    } else {
+      await setDoc(
+        ref,
+        hasUpdatedAt
+          ? { ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }
+          : { ...payload, createdAt: serverTimestamp() }
+      );
+    }
+
+    // Clear delete tombstone if previously deleted
+    const delId = `${colName}_${safeId}`;
+    if (deletedIdsRef.current[colName]?.has(safeId)) {
+      await deleteDoc(doc(db, 'contentDeletes', delId)).catch(() => {});
+    }
+  };
+
   const syncItemToFirestore = useCallback(
     async (colName: string, id: string, item: Record<string, unknown>) => {
-      if (!hasFirestoreAdminAuth) return;
+      if (!isAdmin) return;
+      const safeId = toSafeId(id, colName === 'appSettings' ? 'global' : 'item');
       try {
         const payload = sanitizeForFirestore(colName, item);
-        const ref = doc(db, colName === 'appSettings' ? 'appSettings' : colName, colName === 'appSettings' ? 'global' : id);
         if (colName === 'appSettings') {
-          await setDoc(ref, { ...payload, settingId: 'global', updatedAt: serverTimestamp() }, { merge: true });
-        } else {
-          const existingSnap = await getDoc(ref);
-          const hasUpdatedAt = colName !== 'resources' && colName !== 'announcements';
-          if (existingSnap.exists()) {
-            await setDoc(
-              ref,
-              hasUpdatedAt ? { ...payload, updatedAt: serverTimestamp() } : payload,
-              { merge: true }
-            );
-          } else {
-            await setDoc(
-              ref,
-              hasUpdatedAt
-                ? { ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }
-                : { ...payload, createdAt: serverTimestamp() }
-            );
-          }
+          await setDoc(
+            doc(db, 'appSettings', 'global'),
+            { ...payload, settingId: 'global', updatedAt: serverTimestamp() },
+            { merge: true }
+          );
+          setFirebaseConnected(true);
+          return;
+        }
+
+        await syncSingleCollectionDoc(colName, safeId, payload);
+        if (colName === 'lessons') {
+          await syncSingleCollectionDoc('videos', safeId, payload);
+        } else if (colName === 'announcements') {
+          await syncSingleCollectionDoc('notices', safeId, payload);
         }
         setFirebaseConnected(true);
       } catch (err) {
-        console.warn('Firestore item sync warning:', err);
+        handleFirestoreError(err, OperationType.WRITE, `${colName}/${safeId}`);
       }
     },
-    [hasFirestoreAdminAuth]
+    [isAdmin]
   );
 
   const deleteItemFromFirestore = useCallback(
     async (colName: string, id: string) => {
-      if (!hasFirestoreAdminAuth) return;
+      if (!isAdmin) return;
+      const safeId = toSafeId(id, 'item');
       try {
-        await deleteDoc(doc(db, colName, id));
-      } catch {
-        // Non-blocking fallback
+        const deleteAndTombstone = async (targetCol: string) => {
+          await deleteDoc(doc(db, targetCol, safeId));
+          if (targetCol.startsWith('users')) return;
+          const deleteId = `${targetCol}_${safeId}`;
+          await setDoc(doc(db, 'contentDeletes', deleteId), {
+            deleteId,
+            collection: targetCol,
+            itemId: safeId,
+            deletedAt: serverTimestamp(),
+          });
+        };
+
+        await deleteAndTombstone(colName);
+        if (colName === 'lessons') {
+          await deleteAndTombstone('videos');
+        } else if (colName === 'announcements') {
+          await deleteAndTombstone('notices');
+        }
+        setFirebaseConnected(true);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.DELETE, `${colName}/${safeId}`);
       }
     },
-    [hasFirestoreAdminAuth]
+    [isAdmin]
   );
 
   const syncAdminInviteToFirestore = useCallback(
@@ -905,11 +1162,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const seedCurriculumFromAdmin = useCallback(async () => {
-    if (!hasFirestoreAdminAuth) {
-      throw new Error('Connect your Firebase Google Admin account first to sync with Firestore.');
+    if (!isAdmin) {
+      throw new Error('Unlock the Admin Panel first to sync with Firestore.');
     }
 
-    const existingIdsByCol = new Map<string, Set<string>>();
+    const existingCreatedAtByCol = new Map<string, Map<string, unknown>>();
     const collectionsToCheck = [
       'categories',
       'classes',
@@ -917,25 +1174,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       'chapters',
       'topics',
       'lessons',
+      'videos',
       'resources',
       'quizzes',
       'announcements',
+      'notices',
     ];
     await Promise.all(
       collectionsToCheck.map(async (colName) => {
+        const map = new Map<string, unknown>();
         try {
           const snap = await getDocs(collection(db, colName));
-          existingIdsByCol.set(colName, new Set(snap.docs.map((d) => d.id)));
+          for (const d of snap.docs) {
+            const rawCreated = d.data()?.createdAt;
+            const isTs =
+              Boolean(rawCreated) &&
+              typeof rawCreated === 'object' &&
+              'toMillis' in (rawCreated as Record<string, unknown>);
+            if (isTs) {
+              map.set(d.id, rawCreated);
+            }
+          }
         } catch {
-          existingIdsByCol.set(colName, new Set());
+          // ignore read errors on pre-check
         }
+        existingCreatedAtByCol.set(colName, map);
       })
     );
 
     const ops: Array<{ col: string; id: string; data: Record<string, unknown>; hasUpdatedAt: boolean }> = [];
     const queueCollection = (col: string, idField: string, items: Array<Record<string, unknown>>, hasUpdatedAt = true) => {
       for (const raw of items) {
-        const id = String(raw[idField] || '');
+        const id = toSafeId(raw[idField], '');
         if (!id) continue;
         ops.push({ col, id, data: sanitizeForFirestore(col, raw), hasUpdatedAt });
       }
@@ -947,9 +1217,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     queueCollection('chapters', 'chapterId', chapters as unknown as Array<Record<string, unknown>>);
     queueCollection('topics', 'topicId', topics as unknown as Array<Record<string, unknown>>);
     queueCollection('lessons', 'lessonId', lessons as unknown as Array<Record<string, unknown>>);
+    queueCollection('videos', 'lessonId', lessons as unknown as Array<Record<string, unknown>>);
     queueCollection('resources', 'resourceId', resources as unknown as Array<Record<string, unknown>>, false);
     queueCollection('quizzes', 'quizId', quizzes as unknown as Array<Record<string, unknown>>);
     queueCollection('announcements', 'announcementId', announcements as unknown as Array<Record<string, unknown>>, false);
+    queueCollection('notices', 'announcementId', announcements as unknown as Array<Record<string, unknown>>, false);
 
     // Commit appSettings first
     const settingsBatch = writeBatch(db);
@@ -965,44 +1237,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const chunk = ops.slice(i, i + 350);
       const batch = writeBatch(db);
       for (const op of chunk) {
-        const exists = existingIdsByCol.get(op.col)?.has(op.id) ?? false;
+        const existingCreatedAt = existingCreatedAtByCol.get(op.col)?.get(op.id);
         const ref = doc(db, op.col, op.id);
-        if (exists) {
-          batch.set(
-            ref,
-            op.hasUpdatedAt ? { ...op.data, updatedAt: serverTimestamp() } : op.data,
-            { merge: true }
-          );
-        } else {
-          batch.set(
-            ref,
-            op.hasUpdatedAt
-              ? { ...op.data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }
-              : { ...op.data, createdAt: serverTimestamp() }
-          );
-        }
+        batch.set(ref, {
+          ...op.data,
+          createdAt: existingCreatedAt || serverTimestamp(),
+          ...(op.hasUpdatedAt ? { updatedAt: serverTimestamp() } : {}),
+        });
       }
       await batch.commit();
     }
 
-    // Write audit log to Firestore
-    try {
-      const logId = createClientId('log');
-      await setDoc(doc(db, 'activityLogs', logId), {
-        logId,
-        actorId: firebaseUser?.uid || 'admin',
-        actorName: firebaseUser?.email || currentAdmin?.name || 'Admin',
-        action: 'FIRESTORE_CURRICULUM_SYNC',
-        target: `${ops.length} items`,
-        timestamp: serverTimestamp(),
-      });
-    } catch {
-      // non-blocking
+    if (hasFirestoreAdminAuth) {
+      try {
+        const logId = createClientId('log');
+        await setDoc(doc(db, 'activityLogs', logId), {
+          logId,
+          actorId: firebaseUser?.uid || 'admin',
+          actorName: firebaseUser?.email || currentAdmin?.name || 'Admin',
+          action: 'FIRESTORE_CURRICULUM_SYNC',
+          target: `${ops.length} items`,
+          timestamp: serverTimestamp(),
+        });
+      } catch {
+        // non-blocking
+      }
     }
 
     setFirebaseConnected(true);
     await refreshCurriculum();
   }, [
+    isAdmin,
     hasFirestoreAdminAuth,
     appSettings,
     categories,

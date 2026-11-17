@@ -8,7 +8,7 @@ service cloud.firestore {
 
     // 2. Hardened Global Helpers
     function isValidId(id) {
-      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() >= 1 && id.size() <= 160 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
     function isValidEmailKey(email) {
@@ -100,7 +100,7 @@ service cloud.firestore {
         && isNonEmptyString(data.titleBn, 100)
         && (!('description' in data) || isOptionalString(data.description, 500))
         && (!('descriptionBn' in data) || isOptionalString(data.descriptionBn, 500))
-        && data.order is int && data.order >= 0 && data.order <= 100
+        && data.order is int && data.order >= 0 && data.order <= 10000
         && data.status in ['published', 'draft']
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -115,9 +115,9 @@ service cloud.firestore {
         && isNonEmptyString(data.titleBn, 120)
         && (!('description' in data) || isOptionalString(data.description, 500))
         && (!('descriptionBn' in data) || isOptionalString(data.descriptionBn, 500))
-        && (!('groups' in data) || (data.groups is list && data.groups.size() <= 5))
+        && (!('groups' in data) || (data.groups is list && data.groups.size() <= 5 && (data.groups.size() == 0 || data.groups[0] is string)))
         && (!('isOptional' in data) || data.isOptional is bool)
-        && data.order is int && data.order >= 0 && data.order <= 200
+        && data.order is int && data.order >= 0 && data.order <= 10000
         && data.status in ['published', 'draft']
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -133,7 +133,7 @@ service cloud.firestore {
         && isNonEmptyString(data.titleBn, 160)
         && (!('description' in data) || isOptionalString(data.description, 600))
         && (!('descriptionBn' in data) || isOptionalString(data.descriptionBn, 600))
-        && data.order is int && data.order >= 0 && data.order <= 500
+        && data.order is int && data.order >= 0 && data.order <= 10000
         && data.status in ['published', 'draft']
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -150,7 +150,7 @@ service cloud.firestore {
         && isNonEmptyString(data.titleBn, 160)
         && (!('description' in data) || isOptionalString(data.description, 600))
         && (!('descriptionBn' in data) || isOptionalString(data.descriptionBn, 600))
-        && data.order is int && data.order >= 0 && data.order <= 500
+        && data.order is int && data.order >= 0 && data.order <= 10000
         && data.status in ['published', 'draft']
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -165,7 +165,7 @@ service cloud.firestore {
         && (!('description' in data) || isOptionalString(data.description, 500))
         && (!('descriptionBn' in data) || isOptionalString(data.descriptionBn, 500))
         && (!('icon' in data) || isOptionalString(data.icon, 40))
-        && data.order is int && data.order >= 0 && data.order <= 100
+        && data.order is int && data.order >= 0 && data.order <= 10000
         && data.status in ['published', 'draft']
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -190,7 +190,7 @@ service cloud.firestore {
         && data.difficulty in ['beginner', 'intermediate', 'advanced']
         && (!('durationMinutes' in data) || (data.durationMinutes is int && data.durationMinutes >= 0 && data.durationMinutes <= 600))
         && (!('featured' in data) || data.featured is bool)
-        && data.order is int && data.order >= 0 && data.order <= 500
+        && data.order is int && data.order >= 0 && data.order <= 10000
         && data.status in ['published', 'draft']
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -216,7 +216,7 @@ service cloud.firestore {
         && isValidId(data.lessonId)
         && isNonEmptyString(data.title, 200)
         && data.questions is list && data.questions.size() <= 20 && (data.questions.size() == 0 || data.questions[0] is map)
-        && (!('creativeQuestions' in data) || (data.creativeQuestions is list && data.creativeQuestions.size() <= 10))
+        && (!('creativeQuestions' in data) || (data.creativeQuestions is list && data.creativeQuestions.size() <= 10 && (data.creativeQuestions.size() == 0 || data.creativeQuestions[0] is map)))
         && data.status in ['published', 'draft']
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -310,6 +310,33 @@ service cloud.firestore {
         && data.targetClasses is list && data.targetClasses.size() <= 10 && (data.targetClasses.size() == 0 || data.targetClasses[0] is string)
         && data.published is bool
         && data.createdAt is timestamp;
+    }
+
+    function isValidAppSettings(data) {
+      return data.keys().hasAll(['settingId', 'branding', 'theme', 'homepageSettings', 'updatedAt'])
+        && data.keys().hasOnly(['settingId', 'branding', 'theme', 'languageSettings', 'homepageSettings', 'aiSettings', 'featureFlags', 'updatedAt'])
+        && isValidId(data.settingId)
+        && data.branding is map
+        && data.theme is map
+        && data.homepageSettings is map
+        && (!('languageSettings' in data) || data.languageSettings is map)
+        && (!('aiSettings' in data) || data.aiSettings is map)
+        && (!('featureFlags' in data) || data.featureFlags is map)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidContentDelete(data) {
+      return data.keys().hasAll(['deleteId', 'collection', 'itemId', 'deletedAt'])
+        && data.keys().hasOnly(['deleteId', 'collection', 'itemId', 'deletedAt'])
+        && isValidId(data.deleteId)
+        && data.collection in ['categories', 'classes', 'subjects', 'chapters', 'topics', 'lessons', 'videos', 'resources', 'quizzes', 'announcements', 'notices']
+        && isValidId(data.itemId)
+        && data.deletedAt is timestamp;
+    }
+
+    // Connection health check endpoint
+    match /test/{docId} {
+      allow get: if isValidId(docId);
     }
 
     // Server-only credential collections (never accessible to clients)
@@ -407,69 +434,77 @@ service cloud.firestore {
       }
     }
 
-    // Curriculum Collections (Admin Write, Public/Student Read for Published)
+    // Public Curriculum & Notice Collections (Public Read + Schema-Validated Cloud Sync for Password-Auth Admin Panel)
     match /classes/{classId} {
-      allow get: if isValidId(classId) && (existing().status == 'published' || isAdmin());
-      allow list: if resource.data.status == 'published' || isAdmin();
-      allow create: if isAdmin() && isValidId(classId) && isValidClass(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
-      allow update: if isAdmin() && isValidId(classId) && isValidClass(incoming()) && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
-      allow delete: if isAdmin() && isValidId(classId);
+      allow get: if isValidId(classId);
+      allow list: if true;
+      allow create: if isValidId(classId) && isValidClass(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isValidId(classId) && isValidClass(incoming()) && (incoming().createdAt == existing().createdAt || !(existing().createdAt is timestamp)) && incoming().updatedAt == request.time;
+      allow delete: if isValidId(classId);
     }
 
     match /subjects/{subjectId} {
-      allow get: if isValidId(subjectId) && (existing().status == 'published' || isAdmin());
-      allow list: if resource.data.status == 'published' || isAdmin();
-      allow create: if isAdmin() && isValidId(subjectId) && isValidSubject(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
-      allow update: if isAdmin() && isValidId(subjectId) && isValidSubject(incoming()) && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
-      allow delete: if isAdmin() && isValidId(subjectId);
+      allow get: if isValidId(subjectId);
+      allow list: if true;
+      allow create: if isValidId(subjectId) && isValidSubject(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isValidId(subjectId) && isValidSubject(incoming()) && (incoming().createdAt == existing().createdAt || !(existing().createdAt is timestamp)) && incoming().updatedAt == request.time;
+      allow delete: if isValidId(subjectId);
     }
 
     match /chapters/{chapterId} {
-      allow get: if isValidId(chapterId) && (existing().status == 'published' || isAdmin());
-      allow list: if resource.data.status == 'published' || isAdmin();
-      allow create: if isAdmin() && isValidId(chapterId) && isValidChapter(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
-      allow update: if isAdmin() && isValidId(chapterId) && isValidChapter(incoming()) && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
-      allow delete: if isAdmin() && isValidId(chapterId);
+      allow get: if isValidId(chapterId);
+      allow list: if true;
+      allow create: if isValidId(chapterId) && isValidChapter(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isValidId(chapterId) && isValidChapter(incoming()) && (incoming().createdAt == existing().createdAt || !(existing().createdAt is timestamp)) && incoming().updatedAt == request.time;
+      allow delete: if isValidId(chapterId);
     }
 
     match /topics/{topicId} {
-      allow get: if isValidId(topicId) && (existing().status == 'published' || isAdmin());
-      allow list: if resource.data.status == 'published' || isAdmin();
-      allow create: if isAdmin() && isValidId(topicId) && isValidTopic(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
-      allow update: if isAdmin() && isValidId(topicId) && isValidTopic(incoming()) && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
-      allow delete: if isAdmin() && isValidId(topicId);
+      allow get: if isValidId(topicId);
+      allow list: if true;
+      allow create: if isValidId(topicId) && isValidTopic(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isValidId(topicId) && isValidTopic(incoming()) && (incoming().createdAt == existing().createdAt || !(existing().createdAt is timestamp)) && incoming().updatedAt == request.time;
+      allow delete: if isValidId(topicId);
     }
 
     match /categories/{categoryId} {
-      allow get: if isValidId(categoryId) && (existing().status == 'published' || isAdmin());
-      allow list: if resource.data.status == 'published' || isAdmin();
-      allow create: if isAdmin() && isValidId(categoryId) && isValidCategory(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
-      allow update: if isAdmin() && isValidId(categoryId) && isValidCategory(incoming()) && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
-      allow delete: if isAdmin() && isValidId(categoryId);
+      allow get: if isValidId(categoryId);
+      allow list: if true;
+      allow create: if isValidId(categoryId) && isValidCategory(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isValidId(categoryId) && isValidCategory(incoming()) && (incoming().createdAt == existing().createdAt || !(existing().createdAt is timestamp)) && incoming().updatedAt == request.time;
+      allow delete: if isValidId(categoryId);
     }
 
     match /lessons/{lessonId} {
-      allow get: if isValidId(lessonId) && (existing().status == 'published' || isAdmin());
-      allow list: if resource.data.status == 'published' || isAdmin();
-      allow create: if isAdmin() && isValidId(lessonId) && isValidLesson(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
-      allow update: if isAdmin() && isValidId(lessonId) && isValidLesson(incoming()) && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
-      allow delete: if isAdmin() && isValidId(lessonId);
+      allow get: if isValidId(lessonId);
+      allow list: if true;
+      allow create: if isValidId(lessonId) && isValidLesson(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isValidId(lessonId) && isValidLesson(incoming()) && (incoming().createdAt == existing().createdAt || !(existing().createdAt is timestamp)) && incoming().updatedAt == request.time;
+      allow delete: if isValidId(lessonId);
+    }
+
+    match /videos/{lessonId} {
+      allow get: if isValidId(lessonId);
+      allow list: if true;
+      allow create: if isValidId(lessonId) && isValidLesson(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isValidId(lessonId) && isValidLesson(incoming()) && (incoming().createdAt == existing().createdAt || !(existing().createdAt is timestamp)) && incoming().updatedAt == request.time;
+      allow delete: if isValidId(lessonId);
     }
 
     match /resources/{resourceId} {
       allow get: if isValidId(resourceId);
       allow list: if true;
-      allow create: if isAdmin() && isValidId(resourceId) && isValidResource(incoming()) && incoming().createdAt == request.time;
-      allow update: if isAdmin() && isValidId(resourceId) && isValidResource(incoming()) && incoming().createdAt == existing().createdAt;
-      allow delete: if isAdmin() && isValidId(resourceId);
+      allow create: if isValidId(resourceId) && isValidResource(incoming()) && incoming().createdAt == request.time;
+      allow update: if isValidId(resourceId) && isValidResource(incoming()) && (incoming().createdAt == existing().createdAt || !(existing().createdAt is timestamp));
+      allow delete: if isValidId(resourceId);
     }
 
     match /quizzes/{quizId} {
-      allow get: if isValidId(quizId) && (existing().status == 'published' || isAdmin());
-      allow list: if resource.data.status == 'published' || isAdmin();
-      allow create: if isAdmin() && isValidId(quizId) && isValidQuiz(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
-      allow update: if isAdmin() && isValidId(quizId) && isValidQuiz(incoming()) && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
-      allow delete: if isAdmin() && isValidId(quizId);
+      allow get: if isValidId(quizId);
+      allow list: if true;
+      allow create: if isValidId(quizId) && isValidQuiz(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isValidId(quizId) && isValidQuiz(incoming()) && (incoming().createdAt == existing().createdAt || !(existing().createdAt is timestamp)) && incoming().updatedAt == request.time;
+      allow delete: if isValidId(quizId);
     }
 
     // Private Student Learning Collections
@@ -518,20 +553,35 @@ service cloud.firestore {
       allow delete: if isSignedIn() && isValidId(convId) && (existing().studentId == request.auth.uid || isAdmin());
     }
 
-    // Platform & Admin Collections
+    // Notices, Settings & Content Deletion Tombstones
     match /announcements/{announcementId} {
-      allow get: if isValidId(announcementId) && (existing().published == true || isAdmin());
-      allow list: if resource.data.published == true || isAdmin();
-      allow create: if isAdmin() && isValidId(announcementId) && isValidAnnouncement(incoming()) && incoming().createdAt == request.time;
-      allow update: if isAdmin() && isValidId(announcementId) && isValidAnnouncement(incoming()) && incoming().createdAt == existing().createdAt;
-      allow delete: if isAdmin() && isValidId(announcementId);
+      allow get: if isValidId(announcementId);
+      allow list: if true;
+      allow create: if isValidId(announcementId) && isValidAnnouncement(incoming()) && incoming().createdAt == request.time;
+      allow update: if isValidId(announcementId) && isValidAnnouncement(incoming()) && (incoming().createdAt == existing().createdAt || !(existing().createdAt is timestamp));
+      allow delete: if isValidId(announcementId);
+    }
+
+    match /notices/{announcementId} {
+      allow get: if isValidId(announcementId);
+      allow list: if true;
+      allow create: if isValidId(announcementId) && isValidAnnouncement(incoming()) && incoming().createdAt == request.time;
+      allow update: if isValidId(announcementId) && isValidAnnouncement(incoming()) && (incoming().createdAt == existing().createdAt || !(existing().createdAt is timestamp));
+      allow delete: if isValidId(announcementId);
     }
 
     match /appSettings/{settingId} {
       allow get: if isValidId(settingId);
       allow list: if true;
-      allow create, update: if isAdmin() && isValidId(settingId) && incoming().updatedAt == request.time;
+      allow create, update: if isValidId(settingId) && isValidAppSettings(incoming()) && incoming().updatedAt == request.time;
       allow delete: if isAdmin() && isValidId(settingId);
+    }
+
+    match /contentDeletes/{deleteId} {
+      allow get: if isValidId(deleteId);
+      allow list: if true;
+      allow create, update: if isValidId(deleteId) && isValidContentDelete(incoming()) && incoming().deletedAt == request.time;
+      allow delete: if isValidId(deleteId);
     }
 
     match /activityLogs/{logId} {

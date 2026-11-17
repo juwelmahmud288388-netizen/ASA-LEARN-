@@ -32,6 +32,7 @@ import { GROUP_OPTIONS } from '../lib/subjectIcons';
 import { type AcademicGroup, getStudentAuthHeaders, useApp } from '../context/AppContext';
 import { t } from '../i18n/translations';
 import { TrophyRoom } from '../components/TrophyRoom';
+import type { Announcement } from '../types';
 
 type DashboardTab = 'overview' | 'trophies' | 'bookmarks' | 'notes' | 'calendar' | 'notifications' | 'settings';
 
@@ -180,9 +181,35 @@ export const StudentDashboard: React.FC = () => {
   }, [notes, noteSearch, noteSubjectFilter]);
 
   const classAnnouncements = useMemo(() => {
-    return announcements.filter(
-      (a) => a.targetClasses.length === 0 || a.targetClasses.includes(studentClassId)
-    );
+    const levelWeight = (lvl?: Announcement['noticeLevel']) =>
+      lvl === 'emergency' ? 3 : lvl === 'warning' ? 2 : 1;
+    const toTime = (val: unknown): number => {
+      if (!val) return 0;
+      if (typeof val === 'string' || typeof val === 'number') return new Date(val).getTime() || 0;
+      if (typeof val === 'object' && val !== null && 'toDate' in val && typeof (val as { toDate: () => Date }).toDate === 'function') {
+        return (val as { toDate: () => Date }).toDate().getTime() || 0;
+      }
+      if (typeof val === 'object' && val !== null && 'seconds' in val) {
+        return ((val as { seconds: number }).seconds || 0) * 1000;
+      }
+      if (typeof val === 'object' && val !== null && '_seconds' in val) {
+        return ((val as { _seconds: number })._seconds || 0) * 1000;
+      }
+      return 0;
+    };
+    return announcements
+      .filter(
+        (a) =>
+          a.published !== false &&
+          (a.targetClasses.length === 0 ||
+            a.targetClasses.includes('all') ||
+            a.targetClasses.includes(studentClassId))
+      )
+      .sort((a, b) => {
+        const wDiff = levelWeight(b.noticeLevel) - levelWeight(a.noticeLevel);
+        if (wDiff !== 0) return wDiff;
+        return toTime(b.createdAt) - toTime(a.createdAt);
+      });
   }, [announcements, studentClassId]);
 
   if (authLoading) {

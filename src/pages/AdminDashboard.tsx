@@ -449,13 +449,29 @@ export const AdminDashboard: React.FC = () => {
       }
 
       const removedIds: Array<{ col: string; id: string }> = [
+        { col: 'lessons', id: 'les-6-math-lcm' },
+        { col: 'lessons', id: 'les-8-math-algebra' },
+        { col: 'lessons', id: 'les-9-math-trig-basic' },
+        { col: 'lessons', id: 'les-9-phy-newton' },
+        { col: 'lessons', id: 'les-10-math-stats-oneshot' },
+        { col: 'lessons', id: 'les-9-math-trig-oneshot' },
         { col: 'lessons', id: 'les-sample-3d-demo' },
         { col: 'lessons', id: 'les-newton-gravity' },
         { col: 'lessons', id: 'les-6-math-ratios' },
         { col: 'lessons', id: 'les-8-atom-3d' },
         { col: 'lessons', id: 'les-10-trigonometry-oneshot' },
+        { col: 'quizzes', id: 'quiz-9-trig' },
+        { col: 'quizzes', id: 'quiz-9-newton' },
+        { col: 'quizzes', id: 'quiz-10-stats' },
+        { col: 'quizzes', id: 'quiz-6-lcm' },
         { col: 'quizzes', id: 'quiz-trig-intro' },
+        { col: 'resources', id: 'res-9-math-trig' },
+        { col: 'resources', id: 'res-10-math-stats' },
+        { col: 'resources', id: 'res-9-phy-newton' },
+        { col: 'resources', id: 'res-6-math-lcm' },
         { col: 'resources', id: 'res-trig-sheet' },
+        { col: 'announcements', id: 'ann-welcome-2026' },
+        { col: 'announcements', id: 'ann-oneshot-9-10' },
         { col: 'announcements', id: 'ann-welcome' },
       ];
       for (const pair of removedIds) {
@@ -1578,7 +1594,7 @@ export const AdminDashboard: React.FC = () => {
             </p>
             <p className="text-[11px] font-medium text-[#263B91] dark:text-[#BFE8FF]">
               {currentAdmin?.role === 'owner' ? 'Primary Owner' : 'Authorized Admin'} ·{' '}
-              {hasFirestoreAdminAuth ? 'Cloud Synced' : 'Local Ready'}
+              {firebaseConnected || hasFirestoreAdminAuth ? 'Cloud Sync Active' : 'Syncing Cloud'}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
@@ -1663,30 +1679,30 @@ export const AdminDashboard: React.FC = () => {
                 <span className="font-semibold text-[#64748B] dark:text-slate-400">Firebase Cloud</span>
                 <span
                   className={`font-bold ${
-                    hasFirestoreAdminAuth
+                    firebaseConnected || hasFirestoreAdminAuth
                       ? 'text-emerald-600 dark:text-emerald-400'
-                      : firebaseConnected
-                        ? 'text-amber-600 dark:text-amber-400'
-                        : 'text-slate-500'
+                      : 'text-amber-600 dark:text-amber-400'
                   }`}
                 >
-                  {hasFirestoreAdminAuth ? '● Connected' : '○ Connect Needed'}
+                  {firebaseConnected || hasFirestoreAdminAuth ? '● Live Sync' : '○ Connecting'}
                 </span>
               </div>
-              {firebaseUser?.email && (
-                <p className="mt-1 truncate text-[10px] text-[#64748B] dark:text-slate-400">
-                  {firebaseUser.email}
-                </p>
-              )}
+              <p className="mt-1 truncate text-[10px] text-[#64748B] dark:text-slate-400">
+                {firebaseUser?.email
+                  ? firebaseUser.email
+                  : language === 'bn'
+                    ? 'সরাসরি Firestore সিঙ্ক চালু আছে'
+                    : 'Direct Firestore Sync Active'}
+              </p>
               {!hasFirestoreAdminAuth && (
                 <button
                   type="button"
                   disabled={firebaseConnecting}
                   onClick={() => void handleConnectFirebase(false)}
-                  className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#172554] py-1.5 text-[11px] font-semibold text-white hover:bg-[#263B91] disabled:opacity-50 dark:bg-[#BFE8FF] dark:text-[#172554]"
+                  className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-[#172554]/15 bg-white py-1.5 text-[11px] font-semibold text-[#172554] hover:bg-[#E7F5FF] disabled:opacity-50 dark:border-white/15 dark:bg-slate-800 dark:text-[#BFE8FF]"
                 >
                   <Cloud className="h-3 w-3" />
-                  <span>{firebaseConnecting ? 'Connecting...' : 'Connect Google'}</span>
+                  <span>{firebaseConnecting ? 'Linking...' : 'Link Google Admin'}</span>
                 </button>
               )}
             </div>
@@ -1711,32 +1727,26 @@ export const AdminDashboard: React.FC = () => {
 
         {/* Main Content */}
         <main className="space-y-6 lg:col-span-9">
-          {!hasFirestoreAdminAuth && (
-            <div className="glass-surface flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-500/30 bg-amber-50/75 px-4 py-3 text-xs dark:border-amber-400/25 dark:bg-amber-950/35">
-              <div className="flex items-start gap-2.5">
-                <Cloud className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" />
-                <div>
-                  <p className="font-bold text-[#172033] dark:text-white">
-                    {language === 'bn'
-                      ? 'লাইভ Firebase Firestore সিঙ্ক যুক্ত করুন'
-                      : 'Connect Firebase Firestore for Live Cloud Sync'}
-                  </p>
-                  <p className="text-[11px] text-[#64748B] dark:text-slate-300">
-                    {language === 'bn'
-                      ? 'আপনি পাসওয়ার্ড দিয়ে প্রবেশ করেছেন। Firestore ডাটাবেসে সরাসরি ক্লাস, বিষয় ও সেটিংস সেভ করতে Google দিয়ে কানেক্ট করুন।'
-                      : 'You are unlocked with the Admin Access Password. Connect your authorized Google account to sync all curriculum & settings directly to Firestore.'}
-                  </p>
-                </div>
+          {firebaseConnected && (
+            <div className="glass-surface flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-500/25 bg-emerald-50/70 px-4 py-2.5 text-xs dark:border-emerald-400/25 dark:bg-emerald-950/30">
+              <div className="flex items-center gap-2.5">
+                <Cloud className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" />
+                <p className="text-[11px] font-medium text-[#172033] dark:text-slate-200">
+                  {language === 'bn'
+                    ? 'লাইভ Firebase Firestore ক্লাউড সিঙ্ক সক্রিয় আছে — এখান থেকে প্রকাশিত সব ভিডিও ক্লাস, অধ্যায় ও নোটিশ সাথে সাথে সব শিক্ষার্থীর পেজে দৃশ্যমান হবে।'
+                    : 'Live Firebase Firestore Cloud Sync active — all published classes, YouTube videos & notices appear immediately for students and public visitors.'}
+                </p>
               </div>
-              <button
-                type="button"
-                disabled={firebaseConnecting}
-                onClick={() => void handleConnectFirebase(false)}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-[#172554] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#263B91] disabled:opacity-50 dark:bg-[#BFE8FF] dark:text-[#172554]"
-              >
-                <Cloud className="h-3.5 w-3.5" />
-                <span>{firebaseConnecting ? 'Connecting...' : 'Connect Firebase (Google)'}</span>
-              </button>
+              {!hasFirestoreAdminAuth && (
+                <button
+                  type="button"
+                  disabled={firebaseConnecting}
+                  onClick={() => void handleConnectFirebase(false)}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-[#172554]/15 bg-white px-3 py-1.5 text-[11px] font-semibold text-[#172554] hover:bg-[#E7F5FF] disabled:opacity-50 dark:border-white/15 dark:bg-slate-800 dark:text-[#BFE8FF]"
+                >
+                  <span>{firebaseConnecting ? 'Linking...' : 'Optional: Link Google'}</span>
+                </button>
+              )}
             </div>
           )}
 
@@ -1844,11 +1854,9 @@ export const AdminDashboard: React.FC = () => {
                   </div>
                   <p className="font-mono-nums mt-3 text-3xl font-bold">{adminAccounts.length || 1}</p>
                   <p className="mt-1 text-[11px] text-emerald-50/90">
-                    {hasFirestoreAdminAuth
+                    {firebaseConnected || hasFirestoreAdminAuth
                       ? `Firestore Live (${firestoreStats.lessons} lessons)`
-                      : firebaseConnected
-                        ? 'Firestore Online (Connect Google)'
-                        : 'Local + API Sync'}
+                      : 'Syncing with Firestore'}
                   </p>
                 </div>
               </div>
@@ -3696,11 +3704,11 @@ export const AdminDashboard: React.FC = () => {
                       </h2>
                       <p className="text-xs text-[#64748B] dark:text-slate-400">
                         Status:{' '}
-                        <strong className={hasFirestoreAdminAuth ? 'text-emerald-600' : 'text-amber-600'}>
+                        <strong className={firebaseConnected || hasFirestoreAdminAuth ? 'text-emerald-600' : 'text-amber-600'}>
                           {hasFirestoreAdminAuth
                             ? `Connected (${firebaseUser?.email || 'Admin'})`
                             : firebaseConnected
-                              ? 'Reachable (Connect Google to write)'
+                              ? 'Live Direct Sync Active (Password Admin)'
                               : 'Local Mode'}
                         </strong>
                         {healthInfo.geminiConfigured ? ' · Gemini AI Ready' : ''}

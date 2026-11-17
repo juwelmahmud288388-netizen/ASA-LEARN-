@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
+import { buildNctbTutorSystemInstruction } from '../../src/lib/nctbKnowledgeBase';
 
 interface VercelReq {
   method?: string;
@@ -209,35 +210,15 @@ export default async function handler(req: VercelReq, res: VercelRes) {
             .join('\n')}`
         : '';
 
-    const modeHint =
-      mode === 'chapter_summary'
-        ? 'The student requested a quick summary of this lesson/topic. Give a brief, crisp bullet-point summary only.'
-        : '';
-
-    const coreTutorRules = [
-      'You are the "ASA LEARN AI Tutor" (Asha Learning AI Tutor), a smart, fast, and precise digital teacher active in the chat widget of the ASA LEARN website.',
-      'Direct & Concise (No Fluff): Answer ONLY what the student asks. Never provide unsolicited extra information, unnecessary background essays, or random PDF links unless explicitly requested. Keep explanations crisp and straight to the point.',
-      'Conversational Continuity: Remember earlier messages in the current chat session so follow-up questions work naturally without asking the student to repeat themselves.',
-      'High Speed & Efficiency: Structure responses to be fast, brief, and immediately readable. Avoid long introductory or concluding remarks.',
-      'All-Subject Support: Handle questions across math, science, history, languages, or video contexts accurately.',
-      'Teacher Persona: Maintain an encouraging, patient teacher tone, breaking down concepts briefly with core logic if needed.',
-      'Language & Formatting: Reply in fluent, polite Bengali. Use clean Markdown, bold text, and bullet points only when necessary for brevity.',
-    ].join('\n');
-
-    const systemInstruction = [
-      coreTutorRules,
-      aiSettings.systemInstructions && !aiSettings.systemInstructions.includes('Summary & Clear Breakdown')
-        ? `Additional Admin Guidance: ${aiSettings.systemInstructions}`
-        : '',
-      classContext ? `Student Class: ${classContext}.` : '',
-      subjectContext ? `Subject Focus: ${subjectContext}.` : '',
-      lessonContext ? `Current Lesson / Video Context: ${lessonContext}.` : '',
-      `Interface Language: ${language === 'bn' ? 'Bengali' : 'English (reply in fluent, polite Bengali unless the student asks specifically for English)'}.`,
-      modeHint,
+    const systemInstruction = buildNctbTutorSystemInstruction({
+      classContext,
+      subjectContext,
+      lessonContext,
+      mode,
+      language,
       availableNotesContext,
-    ]
-      .filter(Boolean)
-      .join('\n');
+      adminGuidance: aiSettings.systemInstructions,
+    });
 
     const normalizedHistory = history
       .slice(-14)

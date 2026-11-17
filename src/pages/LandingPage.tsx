@@ -114,9 +114,35 @@ export const LandingPage: React.FC = () => {
     return results.slice(0, 7);
   }, [searchQuery, classes, subjects, chapters, lessons, language]);
 
+  const toTime = (val: unknown): number => {
+    if (!val) return 0;
+    if (typeof val === 'string' || typeof val === 'number') return new Date(val).getTime() || 0;
+    if (
+      typeof val === 'object' &&
+      val !== null &&
+      'toDate' in val &&
+      typeof (val as { toDate: () => Date }).toDate === 'function'
+    ) {
+      return (val as { toDate: () => Date }).toDate().getTime() || 0;
+    }
+    if (typeof val === 'object' && val !== null && 'seconds' in val) {
+      return ((val as { seconds: number }).seconds || 0) * 1000;
+    }
+    if (typeof val === 'object' && val !== null && '_seconds' in val) {
+      return ((val as { _seconds: number })._seconds || 0) * 1000;
+    }
+    return 0;
+  };
+
   const featuredLessons = useMemo(() => {
     const picked = lessons.filter((l) => l.featured);
-    return (picked.length > 0 ? picked : lessons).slice(0, 6);
+    const pool = [...(picked.length > 0 ? picked : lessons)];
+    pool.sort((a, b) => {
+      const timeDiff = toTime(b.updatedAt || b.createdAt) - toTime(a.updatedAt || a.createdAt);
+      if (timeDiff !== 0) return timeDiff;
+      return a.order - b.order;
+    });
+    return pool.slice(0, 6);
   }, [lessons]);
 
   const popupSubjects = useMemo(() => {
@@ -148,17 +174,6 @@ export const LandingPage: React.FC = () => {
   const publishedNotices = useMemo(() => {
     const levelWeight = (lvl?: Announcement['noticeLevel']) =>
       lvl === 'emergency' ? 3 : lvl === 'warning' ? 2 : 1;
-    const toTime = (val: unknown): number => {
-      if (!val) return 0;
-      if (typeof val === 'string' || typeof val === 'number') return new Date(val).getTime() || 0;
-      if (typeof val === 'object' && val !== null && 'toDate' in val && typeof (val as { toDate: () => Date }).toDate === 'function') {
-        return (val as { toDate: () => Date }).toDate().getTime() || 0;
-      }
-      if (typeof val === 'object' && val !== null && '_seconds' in val) {
-        return ((val as { _seconds: number })._seconds || 0) * 1000;
-      }
-      return 0;
-    };
 
     return announcements
       .filter((a) => a.published !== false && !dismissedNoticeIds.includes(a.announcementId))

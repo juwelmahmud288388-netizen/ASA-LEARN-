@@ -5,7 +5,7 @@
 2. **PII Isolation**: Phone numbers and contact details reside in `users/{uid}/private/info` (never exposed to other students). Password hashes and login lockout counters reside in `authSecrets/{uid}`, `phoneIndex/*`, and `studentIdIndex/*`, which deny ALL client reads and writes (`allow read, write: if false`).
 3. **Zero Self-Promotion**: A user document in `users/{uid}` CANNOT be created with `role != 'student'`, and a student CANNOT modify `role`, `accountStatus`, `uid`, or `studentId` on update. Only `isAdmin()` or trusted backend Admin SDK can modify roles or suspend accounts.
 4. **Admin Bootstrapping**: `isAdmin()` verifies either `request.auth.token.email == 'juwelmahmud288388@gmail.com' && request.auth.token.email_verified == true` OR `exists(/databases/$(database)/documents/admins/$(request.auth.uid))`.
-5. **Curriculum Integrity**: `classes`, `subjects`, `chapters`, `topics`, `lessons`, `resources`, `quizzes`, `announcements`, and `appSettings` allow public/student reads ONLY for published records (or all records for `isAdmin()`), and allow writes EXCLUSIVELY by `isAdmin()`.
+5. **Curriculum Integrity**: `classes`, `subjects`, `chapters`, `topics`, `categories`, `lessons`, `videos`, `resources`, `quizzes`, `announcements`, `notices`, `appSettings`, and `contentDeletes` support real-time public reads and schema-validated writes (strict ID format, allowlisted keys via `hasOnly`, `request.time` timestamp validation, clamped integer order bounds, and content deletion tombstones) so the password-unlocked Admin Panel syncs directly to Firestore across Vercel & Cloud Run without manual Firebase Console edits.
 6. **Temporal Integrity & Path Guards**: Document IDs must match `^[a-zA-Z0-9_\-]+$` (<= 128 chars). Timestamps (`createdAt`, `updatedAt`, `completedAt`, `lastViewedAt`) must match `request.time` on client writes. All strings and arrays have strict upper bounds.
 
 ## 2. The "Dirty Dozen" Adversarial Payloads (Must Return PERMISSION_DENIED)
@@ -20,4 +20,4 @@
 9. **ID Poisoning**: Client writes `/studentNotes/<1500-char-junk-id>` or `/studentNotes/bad$id` -> DENIED (`isValidId()` rejects >128 chars and non-alphanumeric chars).
 10. **Resource Exhaustion (1MB String)**: Student writes a 50,000-char `content` in `studentNotes` or 500-char `title` -> DENIED (`size() <= 10000` / `<= 200`).
 11. **Timestamp Forgery**: Student creates `studentNotes` with `createdAt: Timestamp(2020-01-01)` -> DENIED (`incoming().createdAt == request.time`).
-12. **Unauthorized Curriculum Tampering**: Non-admin student attempts to create/update `/lessons/l1` or `/appSettings/global` -> DENIED (`isAdmin()` required).
+12. **Ghost-Field Curriculum Tampering**: Client attempts to create `/lessons/l1` with unknown keys or oversized payload/invalid status -> DENIED (`isValidLesson()` enforces strict keys, sizes, and `request.time`).

@@ -6,8 +6,11 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock,
+  ExternalLink,
   FileText,
+  HardDriveDownload,
   Layers,
+  Loader2,
   Play,
   Search,
   Sparkles,
@@ -16,8 +19,15 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { t } from '../i18n/translations';
+import {
+  downloadVideoToDevice,
+  getCachedOfflineVideoUrl,
+  getSavedOfflineMetaMap,
+  isDirectPlayableVideoUrl,
+  saveOfflineMetaEntry,
+} from '../lib/offlineVideo';
 import { getClassMeta, getSubjectVisual, GROUP_OPTIONS } from '../lib/subjectIcons';
-import { getYouTubeEmbedUrl } from '../lib/utils';
+import { extractYouTubeId, getYouTubeEmbedUrl } from '../lib/utils';
 import type { LessonItem, SubjectGroup } from '../types';
 
 type LearningTab = 'basic_to_pro' | 'one_shot';
@@ -59,6 +69,14 @@ export const ClassDirectoryPage: React.FC = () => {
   const [selectedChapterKey, setSelectedChapterKey] = useState<string>('');
   const [selectedBasicLessonId, setSelectedBasicLessonId] = useState<string>('');
   const [selectedOneShotId, setSelectedOneShotId] = useState<string>('');
+  const [cachedVideoSrcMap, setCachedVideoSrcMap] = useState<Record<string, string>>({});
+  const [downloadingLessonId, setDownloadingLessonId] = useState<string | null>(null);
+  const [downloadPct, setDownloadPct] = useState<number | null>(null);
+  const [offlineMsgByLesson, setOfflineMsgByLesson] = useState<Record<string, string>>({});
+  const [savedOfflineMap, setSavedOfflineMap] = useState<Record<string, boolean>>(() => {
+    const map = getSavedOfflineMetaMap();
+    return Object.fromEntries(Object.keys(map).map((k) => [k, true]));
+  });
 
   const hasStudentAccess = Boolean(userProfile?.uid || firebaseUser?.uid);
 
@@ -231,13 +249,114 @@ export const ClassDirectoryPage: React.FC = () => {
     [oneShotLessons, selectedOneShotId]
   );
 
+  const activePlayingLesson = learningTab === 'one_shot' ? activeOneShotLesson : activeBasicLesson;
+
+  const createdBlobUrlsRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    return () => {
+      createdBlobUrlsRef.current.forEach((u) => URL.revokeObjectURL(u));
+      createdBlobUrlsRef.current = [];
+    };
+  }, []);
+
+  useEffect(() => {
+    const url = (activePlayingLesson?.youtubeUrl || '').trim();
+    if (!activePlayingLesson || !isDirectPlayableVideoUrl(url)) return;
+    if (cachedVideoSrcMap[activePlayingLesson.lessonId]) return;
+    let mounted = true;
+    void getCachedOfflineVideoUrl(url).then((blobUrl) => {
+      if (!mounted) {
+        if (blobUrl) URL.revokeObjectURL(blobUrl);
+        return;
+      }
+      if (blobUrl) {
+        createdBlobUrlsRef.current.push(blobUrl);
+        setCachedVideoSrcMap((prev) => ({ ...prev, [activePlayingLesson.lessonId]: blobUrl }));
+        setSavedOfflineMap((prev) => ({ ...prev, [activePlayingLesson.lessonId]: true }));
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [activePlayingLesson?.lessonId, activePlayingLesson?.youtubeUrl]);
+
+  const handleDownloadClassVideo = async (les: LessonItem) => {
+    const cleanUrl = (les.youtubeUrl || '').trim();
+    if (!cleanUrl) return;
+    if (!isDirectPlayableVideoUrl(cleanUrl)) {
+      saveOfflineMetaEntry({
+        lessonId: les.lessonId,
+        title: les.title,
+        titleBn: les.titleBn,
+        videoUrl: cleanUrl,
+        isDirectVideo: false,
+        savedAt: new Date().toISOString(),
+      });
+      setSavedOfflineMap((prev) => ({ ...prev, [les.lessonId]: true }));
+      setOfflineMsgByLesson((prev) => ({
+        ...prev,
+        [les.lessonId]:
+          language === 'bn'
+            ? 'পাঠটি ডিভাইসে সেভ হয়েছে। YouTube ভিডিও অফলাইন ডাউনলোড করতে পাশের লিংকে খুলুন।'
+            : 'Saved offline locally. Use the YouTube link to download the stream in the YouTube app.',
+      }));
+      return;
+    }
+
+    setDownloadingLessonId(les.lessonId);
+    setDownloadPct(0);
+    try {
+      const result = await downloadVideoToDevice({
+        lessonId: les.lessonId,
+        title: language === 'bn' ? les.titleBn || les.title : les.title,
+        titleBn: les.titleBn,
+        url: cleanUrl,
+        onProgress: (pct) => setDownloadPct(pct),
+      });
+      setSavedOfflineMap((prev) => ({ ...prev, [les.lessonId]: true }));
+      const cachedUrl = await getCachedOfflineVideoUrl(cleanUrl);
+      if (cachedUrl) {
+        createdBlobUrlsRef.current.push(cachedUrl);
+        setCachedVideoSrcMap((prev) => ({ ...prev, [les.lessonId]: cachedUrl }));
+      }
+      const sizeMb = result.sizeBytes ? ` (${(result.sizeBytes / (1024 * 1024)).toFixed(1)} MB)` : '';
+      setOfflineMsgByLesson((prev) => ({
+        ...prev,
+        [les.lessonId]:
+          language === 'bn'
+            ? `ভিডিওটি আপনার ডিভাইসে ডাউনলোড হয়েছে${sizeMb}!`
+            : `Downloaded to device & local offline cache${sizeMb}!`,
+      }));
+    } catch {
+      setOfflineMsgByLesson((prev) => ({
+        ...prev,
+        [les.lessonId]:
+          language === 'bn'
+            ? 'ডাউনলোড শুরু হয়েছে — ব্রাউজার ডাউনলোড চেক করুন।'
+            : 'Download triggered — check your browser Downloads folder.',
+      }));
+    } finally {
+      setDownloadingLessonId(null);
+      setDownloadPct(null);
+    }
+  };
+
   const renderEmbeddedVideo = (les: LessonItem) => {
     const cleanUrl = (les.youtubeUrl || '').trim();
-    const isDirectVideo = /\.(mp4|webm|ogg)(\?.*)?$/i.test(cleanUrl);
+    const isDirectVideo = isDirectPlayableVideoUrl(cleanUrl);
     const embedUrl = cleanUrl && !isDirectVideo ? getYouTubeEmbedUrl(cleanUrl) : '';
+    const localSrc = cachedVideoSrcMap[les.lessonId];
 
     if (isDirectVideo) {
-      return <video controls src={cleanUrl} className="h-full w-full bg-black object-contain" />;
+      return (
+        <video
+          controls
+          playsInline
+          src={localSrc || cleanUrl}
+          className="h-full w-full bg-black object-contain"
+        />
+      );
     }
     if (embedUrl) {
       return (
@@ -538,6 +657,48 @@ export const ClassDirectoryPage: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {(les.youtubeUrl || '').trim() && (
+              <button
+                type="button"
+                disabled={downloadingLessonId === les.lessonId}
+                onClick={() => void handleDownloadClassVideo(les)}
+                className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
+                  savedOfflineMap[les.lessonId]
+                    ? 'border border-emerald-500/25 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300'
+                    : 'border border-[#172554]/15 bg-[#E7F5FF] text-[#172554] hover:bg-[#BFE8FF] dark:border-white/15 dark:bg-slate-800 dark:text-[#BFE8FF]'
+                }`}
+              >
+                {downloadingLessonId === les.lessonId ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <HardDriveDownload className="h-3.5 w-3.5" />
+                )}
+                <span>
+                  {downloadingLessonId === les.lessonId
+                    ? downloadPct !== null
+                      ? `${language === 'bn' ? 'ডাউনলোড' : 'Saving'} ${downloadPct}%`
+                      : language === 'bn'
+                        ? 'সেভ হচ্ছে...'
+                        : 'Saving...'
+                    : isDirectPlayableVideoUrl(les.youtubeUrl)
+                      ? savedOfflineMap[les.lessonId]
+                        ? language === 'bn'
+                          ? 'অফলাইনে সেভ আছে'
+                          : 'Offline Ready'
+                        : language === 'bn'
+                          ? 'ভিডিও ডাউনলোড'
+                          : 'Download Video'
+                      : savedOfflineMap[les.lessonId]
+                        ? language === 'bn'
+                          ? 'অফলাইন সেভড'
+                          : 'Saved Offline'
+                        : language === 'bn'
+                          ? 'অফলাইন সেভ'
+                          : 'Save Offline'}
+                </span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => openAiWithLesson(les)}
@@ -563,6 +724,25 @@ export const ClassDirectoryPage: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {offlineMsgByLesson[les.lessonId] && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#172554]/10 bg-[#E7F5FF]/70 px-3.5 py-2.5 text-xs dark:border-white/10 dark:bg-slate-900/75">
+            <span className="font-medium text-[#172033] dark:text-slate-200">
+              {offlineMsgByLesson[les.lessonId]}
+            </span>
+            {!isDirectPlayableVideoUrl(les.youtubeUrl) && extractYouTubeId(les.youtubeUrl) && (
+              <a
+                href={`https://www.youtube.com/watch?v=${extractYouTubeId(les.youtubeUrl)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded-xl bg-[#172554] px-3 py-1.5 text-[11px] font-bold text-white hover:bg-[#263B91] dark:bg-[#BFE8FF] dark:text-[#172554]"
+              >
+                <span>{language === 'bn' ? 'YouTube অ্যাপে খুলুন' : 'Open in YouTube App'}</span>
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            )}
+          </div>
+        )}
 
         <h2 className="font-display text-lg font-extrabold text-[#172033] sm:text-xl dark:text-white">
           {language === 'bn' ? les.titleBn || les.title : les.title}
