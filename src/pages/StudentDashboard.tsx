@@ -157,7 +157,12 @@ export const StudentDashboard: React.FC = () => {
   }, [progressList, lessons]);
 
   const recommendedLessons = useMemo(() => {
-    return classLessons.filter((l) => !completedIds.has(l.lessonId)).slice(0, 4);
+    return [...classLessons].sort((a, b) => {
+      const aDone = completedIds.has(a.lessonId) ? 1 : 0;
+      const bDone = completedIds.has(b.lessonId) ? 1 : 0;
+      if (aDone !== bDone) return aDone - bDone;
+      return Number(a.order || 0) - Number(b.order || 0);
+    });
   }, [classLessons, completedIds]);
 
   const earnedCertificates = useMemo(() => {

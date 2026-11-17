@@ -3083,20 +3083,28 @@ async function startServer() {
       saveContentOverrides(overrides);
 
       try {
-        const fsRef = adminDb.collection(colName).doc(id);
-        const fsSnap = await fsRef.get();
-        const { createdAt: _dropCreated, updatedAt: _dropUpdated, ...fsFields } = cleanItem;
-        if (fsSnap.exists) {
-          await fsRef.set(
-            hasUpdatedAtCol ? { ...fsFields, updatedAt: FieldValue.serverTimestamp() } : fsFields,
-            { merge: true }
-          );
-        } else {
-          await fsRef.set(
-            hasUpdatedAtCol
-              ? { ...fsFields, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }
-              : { ...fsFields, createdAt: FieldValue.serverTimestamp() }
-          );
+        const writeDoc = async (targetCol: string) => {
+          const fsRef = adminDb.collection(targetCol).doc(id);
+          const fsSnap = await fsRef.get();
+          const { createdAt: _dropCreated, updatedAt: _dropUpdated, ...fsFields } = cleanItem;
+          if (fsSnap.exists) {
+            await fsRef.set(
+              hasUpdatedAtCol ? { ...fsFields, updatedAt: FieldValue.serverTimestamp() } : fsFields,
+              { merge: true }
+            );
+          } else {
+            await fsRef.set(
+              hasUpdatedAtCol
+                ? { ...fsFields, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }
+                : { ...fsFields, createdAt: FieldValue.serverTimestamp() }
+            );
+          }
+        };
+        await writeDoc(colName);
+        if (colName === 'lessons') {
+          await writeDoc('videos');
+        } else if (colName === 'announcements') {
+          await writeDoc('notices');
         }
         if (generatedQuiz && typeof generatedQuiz.quizId === 'string') {
           await adminDb.collection('quizzes').doc(generatedQuiz.quizId).set(
@@ -3186,6 +3194,11 @@ async function startServer() {
 
       try {
         await adminDb.collection(colName).doc(id).delete();
+        if (colName === 'lessons') {
+          await adminDb.collection('videos').doc(id).delete();
+        } else if (colName === 'announcements') {
+          await adminDb.collection('notices').doc(id).delete();
+        }
       } catch {
         // Best-effort Firestore sync
       }
@@ -3603,6 +3616,18 @@ Include bilingual English & natural Unicode Bangla titles/descriptions for 1 cha
         timestamp: now,
       });
       saveContentOverrides(overrides);
+
+      try {
+        await Promise.all([
+          adminDb.collection('chapters').doc(chapterId).set({ ...chapter, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }),
+          adminDb.collection('topics').doc(topicId).set({ ...topic, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }),
+          adminDb.collection('lessons').doc(lessonId).set({ ...lesson, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }),
+          adminDb.collection('videos').doc(lessonId).set({ ...lesson, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }),
+          adminDb.collection('quizzes').doc(quizId).set({ ...quiz, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }),
+        ]);
+      } catch {
+        // Best-effort Firestore sync (client also syncs)
+      }
 
       res.status(201).json({ ok: true, chapter, topic, lesson, quiz });
     } catch (err) {

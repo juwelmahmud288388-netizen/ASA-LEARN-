@@ -678,11 +678,16 @@ export const AdminDashboard: React.FC = () => {
   // ============================================================================
   const resetLessonForm = () => {
     setEditingLessonId(null);
+    setVidCategory('basic_to_pro');
+    setOneShotTag('Exam Night Special');
     setVidTitle('');
     setVidTitleBn('');
     setVidUrl('');
     setVidDesc('');
     setVidDescBn('');
+    setVidDifficulty('intermediate');
+    setVidDuration(15);
+    setVidStatus('published');
     setVidAiTopic('');
     setVidAiQuestions([]);
     setNewChapterTitle('');
@@ -757,7 +762,7 @@ export const AdminDashboard: React.FC = () => {
         durationMinutes: Number(vidDuration) || 15,
         featured: existingLesson?.featured ?? true,
         order: existingLesson?.order ?? lessons.length + 1,
-        status: vidStatus,
+        status: vidStatus || 'published',
       });
 
       if (!editingLessonId && vidAiQuestions.length > 0) {
@@ -1071,7 +1076,7 @@ export const AdminDashboard: React.FC = () => {
           noticeLevel: entNoticeLevel,
           ...(entImageUrl.trim() ? { imageUrl: entImageUrl.trim() } : {}),
           ...(entVideoUrl.trim() ? { videoUrl: entVideoUrl.trim() } : {}),
-          targetClasses: classes.map((c) => c.classId),
+          targetClasses: ['all', ...classes.map((c) => c.classId)].slice(0, 10),
           published: true,
         });
       }
@@ -1090,7 +1095,13 @@ export const AdminDashboard: React.FC = () => {
     if (!aiModulePrompt.trim()) return;
     setAiModuleBusy(true);
     try {
-      const res = await safeJsonFetch<{ lesson?: { title?: string; titleBn?: string }; error?: string }>(
+      const res = await safeJsonFetch<{
+        chapter?: Record<string, unknown> & { chapterId?: string };
+        topic?: Record<string, unknown> & { topicId?: string };
+        lesson?: Record<string, unknown> & { lessonId?: string; title?: string; titleBn?: string };
+        quiz?: Record<string, unknown> & { quizId?: string };
+        error?: string;
+      }>(
         '/api/admin/ai/generate-module',
         {
           method: 'POST',
@@ -1107,6 +1118,18 @@ export const AdminDashboard: React.FC = () => {
       let titleLabel = aiModulePrompt.trim();
       if (res.ok && res.data) {
         titleLabel = res.data.lesson?.titleBn || res.data.lesson?.title || titleLabel;
+        if (res.data.chapter?.chapterId) {
+          await syncItemToFirestore('chapters', String(res.data.chapter.chapterId), res.data.chapter);
+        }
+        if (res.data.topic?.topicId) {
+          await syncItemToFirestore('topics', String(res.data.topic.topicId), res.data.topic);
+        }
+        if (res.data.lesson?.lessonId) {
+          await syncItemToFirestore('lessons', String(res.data.lesson.lessonId), res.data.lesson);
+        }
+        if (res.data.quiz?.quizId) {
+          await syncItemToFirestore('quizzes', String(res.data.quiz.quizId), res.data.quiz);
+        }
       } else if (shouldFallbackToLocal(res)) {
         const lessonId = createClientId('les');
         const newLesson = {
@@ -1129,12 +1152,16 @@ export const AdminDashboard: React.FC = () => {
           status: 'published',
         };
         localSaveContentItem('lessons', 'lessonId', newLesson);
-        localGenerateLessonPractice({
+        const generatedPractice = localGenerateLessonPractice({
           lessonId,
           title: aiModulePrompt.trim(),
           classId: aiModuleClassId,
           subjectId: aiModuleSubjectId,
         });
+        await syncItemToFirestore('lessons', lessonId, newLesson);
+        if (generatedPractice?.quiz?.quizId) {
+          await syncItemToFirestore('quizzes', generatedPractice.quiz.quizId, generatedPractice.quiz as unknown as Record<string, unknown>);
+        }
       } else {
         throw new Error(res.errorMessage || 'AI Module generation failed.');
       }

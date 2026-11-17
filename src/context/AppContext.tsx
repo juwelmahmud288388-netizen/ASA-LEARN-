@@ -442,6 +442,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const fsDocs = firestoreDocsRef.current;
     const delMap = deletedIdsRef.current;
 
+    const isPubliclyVisibleStatus = (status: unknown): boolean => {
+      const normalized = String(status ?? 'published').trim().toLowerCase();
+      return normalized !== 'draft' && normalized !== 'archived' && normalized !== 'hidden';
+    };
+
+    const mergeDefined = <T extends object>(prev: T, incoming: Partial<T>): T => {
+      const next: Record<string, unknown> = { ...(prev as Record<string, unknown>) };
+      for (const [k, v] of Object.entries(incoming as Record<string, unknown>)) {
+        if (v !== undefined) {
+          next[k] = v;
+        }
+      }
+      return next as T;
+    };
+
     const mergeById = <T extends object>(
       seedItems: T[],
       baseItems: T[],
@@ -461,20 +476,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       for (const item of baseItems) {
         const id = String(item[idField] || '');
-        if (id && !deleted.has(id)) map.set(id, item);
+        if (id && !deleted.has(id)) {
+          const prev = map.get(id) || ({} as T);
+          map.set(id, mergeDefined(prev, item));
+        }
       }
       for (const item of cloudPrimary) {
         const id = String(item[idField] || '');
         if (id && !deleted.has(id)) {
           const prev = map.get(id) || ({} as T);
-          map.set(id, { ...prev, ...item });
+          map.set(id, mergeDefined(prev, item));
         }
       }
       for (const item of cloudMirror) {
         const id = String(item[idField] || '');
         if (id && !deleted.has(id)) {
           const prev = map.get(id) || ({} as T);
-          map.set(id, { ...prev, ...item });
+          map.set(id, mergeDefined(prev, item));
         }
       }
       return Array.from(map.values());
@@ -520,32 +538,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setCategories(
       mergeById(initialSeed.categories, apiBase.categories, fsDocs.categories, [], 'categoryId', ['categories'])
-        .filter((c) => isAdmin || c.status === 'published')
+        .filter((c) => isAdmin || isPubliclyVisibleStatus(c.status))
         .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
     );
     setClasses(
       mergeById(initialSeed.classes, apiBase.classes, fsDocs.classes, [], 'classId', ['classes'])
-        .filter((c) => isAdmin || c.status === 'published')
+        .filter((c) => isAdmin || isPubliclyVisibleStatus(c.status))
         .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
     );
     setSubjects(
       mergeById(initialSeed.subjects, apiBase.subjects, fsDocs.subjects, [], 'subjectId', ['subjects'])
-        .filter((s) => isAdmin || s.status === 'published')
+        .filter((s) => isAdmin || isPubliclyVisibleStatus(s.status))
         .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
     );
     setChapters(
       mergeById(initialSeed.chapters, apiBase.chapters, fsDocs.chapters, [], 'chapterId', ['chapters'])
-        .filter((ch) => isAdmin || ch.status === 'published')
+        .filter((ch) => isAdmin || isPubliclyVisibleStatus(ch.status))
         .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
     );
     setTopics(
       mergeById(initialSeed.topics, apiBase.topics, fsDocs.topics, [], 'topicId', ['topics'])
-        .filter((tp) => isAdmin || tp.status === 'published')
+        .filter((tp) => isAdmin || isPubliclyVisibleStatus(tp.status))
         .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
     );
     setLessons(
       mergeById(initialSeed.lessons, apiBase.lessons, fsDocs.lessons, fsDocs.videos, 'lessonId', ['lessons', 'videos'])
-        .filter((l) => isAdmin || l.status === 'published')
+        .filter((l) => isAdmin || isPubliclyVisibleStatus(l.status))
         .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
     );
     setResources(
@@ -553,7 +571,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
     setQuizzes(
       mergeById(initialSeed.quizzes, apiBase.quizzes, fsDocs.quizzes, [], 'quizId', ['quizzes'])
-        .filter((q) => isAdmin || q.status === 'published')
+        .filter((q) => isAdmin || isPubliclyVisibleStatus(q.status))
     );
     setAnnouncements(
       mergeById(initialSeed.announcements, apiBase.announcements, fsDocs.announcements, fsDocs.notices, 'announcementId', ['announcements', 'notices'])
@@ -769,6 +787,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Real-time Public & Admin Firestore Cloud Sync (works for all visitors without Firebase Auth)
   useEffect(() => {
+    let cancelled = false;
     const unsubs: Array<() => void> = [];
     const safeReport = (err: unknown, path: string) => {
       try {
@@ -778,10 +797,61 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     };
 
+    const normalizeFirestoreDoc = <T extends object>(
+      colName: string,
+      idField: string,
+      docId: string,
+      raw: Record<string, unknown>,
+      index: number
+    ): T => {
+      const out: Record<string, unknown> = {
+        ...raw,
+        [idField]: String(raw[idField] || docId),
+      };
+
+      if (colName !== 'resources' && colName !== 'announcements' && colName !== 'notices') {
+        const st = String(raw.status ?? 'published').trim().toLowerCase();
+        out.status = st === 'draft' ? 'draft' : 'published';
+      }
+
+      if (colName !== 'resources' && colName !== 'quizzes' && colName !== 'announcements' && colName !== 'notices') {
+        const numericOrder = Number(raw.order);
+        out.order = Number.isFinite(numericOrder) ? numericOrder : index + 1;
+      }
+
+      if (colName === 'lessons' || colName === 'videos') {
+        const title = String(raw.title || 'Lesson').trim() || 'Lesson';
+        out.title = title;
+        out.titleBn = String(raw.titleBn || '').trim() || title;
+        out.classId = String(raw.classId || 'class-9');
+        out.subjectId = String(raw.subjectId || 'general');
+        out.chapterId = String(raw.chapterId || '').trim() || 'general';
+        out.topicId = String(raw.topicId || '').trim() || 'general';
+        out.category = String(raw.category || '').trim() || 'basic_to_pro';
+        out.youtubeUrl = String(raw.youtubeUrl || '').trim();
+        out.difficulty =
+          raw.difficulty === 'beginner' || raw.difficulty === 'advanced' ? raw.difficulty : 'intermediate';
+      } else if (colName === 'announcements' || colName === 'notices') {
+        const title = String(raw.title || 'Notice').trim() || 'Notice';
+        out.title = title;
+        out.titleBn = String(raw.titleBn || '').trim() || title;
+        out.content = String(raw.content || '').trim() || title;
+        out.contentBn = String(raw.contentBn || '').trim() || String(out.content);
+        out.published = raw.published !== false;
+        out.targetClasses =
+          Array.isArray(raw.targetClasses) && raw.targetClasses.length > 0
+            ? raw.targetClasses.map(String)
+            : ['all'];
+      }
+
+      return out as T;
+    };
+
     unsubs.push(
       onSnapshot(
         doc(db, 'appSettings', 'global'),
         (snap) => {
+          if (cancelled) return;
           setFirebaseConnected(true);
           if (snap.exists()) {
             setFirestoreStats((prev) => ({ ...prev, settingsSynced: true }));
@@ -799,6 +869,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       onSnapshot(
         collection(db, 'contentDeletes'),
         (snap) => {
+          if (cancelled) return;
           setFirebaseConnected(true);
           const nextDeletes: Record<string, Set<string>> = {};
           snap.docs.forEach((d) => {
@@ -817,54 +888,73 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const watchCollection = <T extends object>(
       colName: string,
+      idField: string,
       key: keyof typeof firestoreDocsRef.current,
       statKey?: keyof FirestoreSyncStats
     ) => {
+      const applySnapshotDocs = (docs: Array<{ id: string; data: () => Record<string, unknown> }>) => {
+        if (cancelled) return;
+        setFirebaseConnected(true);
+        (firestoreDocsRef.current[key] as T[]) = docs.map((d, idx) =>
+          normalizeFirestoreDoc<T>(colName, idField, d.id, d.data() as Record<string, unknown>, idx)
+        );
+        if (statKey && statKey !== 'settingsSynced') {
+          setFirestoreStats((prev) => {
+            if (colName === 'lessons' || colName === 'videos') {
+              const uniqueLessons = new Set<string>([
+                ...firestoreDocsRef.current.lessons.map((l) => l.lessonId),
+                ...firestoreDocsRef.current.videos.map((l) => l.lessonId),
+              ]);
+              return { ...prev, lessons: uniqueLessons.size };
+            }
+            if (colName === 'announcements' || colName === 'notices') {
+              const uniqueNotices = new Set<string>([
+                ...firestoreDocsRef.current.announcements.map((a) => a.announcementId),
+                ...firestoreDocsRef.current.notices.map((a) => a.announcementId),
+              ]);
+              return { ...prev, announcements: uniqueNotices.size };
+            }
+            return { ...prev, [statKey]: docs.length };
+          });
+        }
+        applyMergedCurriculum();
+      };
+
+      void getDocs(collection(db, colName))
+        .then((snap) => {
+          if (!snap.empty) {
+            applySnapshotDocs(snap.docs);
+          }
+        })
+        .catch(() => {
+          // Handled via primary onSnapshot listener diagnostics
+        });
+
       unsubs.push(
         onSnapshot(
           collection(db, colName),
           (snap) => {
-            setFirebaseConnected(true);
-            (firestoreDocsRef.current[key] as T[]) = snap.docs.map((d) => d.data() as T);
-            if (statKey && statKey !== 'settingsSynced') {
-              setFirestoreStats((prev) => {
-                if (colName === 'lessons' || colName === 'videos') {
-                  const uniqueLessons = new Set<string>([
-                    ...firestoreDocsRef.current.lessons.map((l) => l.lessonId),
-                    ...firestoreDocsRef.current.videos.map((l) => l.lessonId),
-                  ]);
-                  return { ...prev, lessons: uniqueLessons.size };
-                }
-                if (colName === 'announcements' || colName === 'notices') {
-                  const uniqueNotices = new Set<string>([
-                    ...firestoreDocsRef.current.announcements.map((a) => a.announcementId),
-                    ...firestoreDocsRef.current.notices.map((a) => a.announcementId),
-                  ]);
-                  return { ...prev, announcements: uniqueNotices.size };
-                }
-                return { ...prev, [statKey]: snap.docs.length };
-              });
-            }
-            applyMergedCurriculum();
+            applySnapshotDocs(snap.docs);
           },
           (err) => safeReport(err, colName)
         )
       );
     };
 
-    watchCollection<CategoryItem>('categories', 'categories');
-    watchCollection<ClassItem>('classes', 'classes', 'classes');
-    watchCollection<SubjectItem>('subjects', 'subjects', 'subjects');
-    watchCollection<ChapterItem>('chapters', 'chapters', 'chapters');
-    watchCollection<TopicItem>('topics', 'topics');
-    watchCollection<LessonItem>('lessons', 'lessons', 'lessons');
-    watchCollection<LessonItem>('videos', 'videos', 'lessons');
-    watchCollection<ResourceItem>('resources', 'resources', 'resources');
-    watchCollection<QuizItem>('quizzes', 'quizzes', 'quizzes');
-    watchCollection<Announcement>('announcements', 'announcements', 'announcements');
-    watchCollection<Announcement>('notices', 'notices', 'announcements');
+    watchCollection<CategoryItem>('categories', 'categoryId', 'categories');
+    watchCollection<ClassItem>('classes', 'classId', 'classes', 'classes');
+    watchCollection<SubjectItem>('subjects', 'subjectId', 'subjects', 'subjects');
+    watchCollection<ChapterItem>('chapters', 'chapterId', 'chapters', 'chapters');
+    watchCollection<TopicItem>('topics', 'topicId', 'topics');
+    watchCollection<LessonItem>('lessons', 'lessonId', 'lessons', 'lessons');
+    watchCollection<LessonItem>('videos', 'lessonId', 'videos', 'lessons');
+    watchCollection<ResourceItem>('resources', 'resourceId', 'resources', 'resources');
+    watchCollection<QuizItem>('quizzes', 'quizId', 'quizzes', 'quizzes');
+    watchCollection<Announcement>('announcements', 'announcementId', 'announcements', 'announcements');
+    watchCollection<Announcement>('notices', 'announcementId', 'notices', 'announcements');
 
     return () => {
+      cancelled = true;
       for (const u of unsubs) u();
     };
   }, [applyMergedCurriculum]);
@@ -1059,11 +1149,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
     }
 
-    // Clear delete tombstone if previously deleted
+    // Unconditionally clear any prior delete tombstone on save (local memory + Firestore)
     const delId = `${colName}_${safeId}`;
-    if (deletedIdsRef.current[colName]?.has(safeId)) {
-      await deleteDoc(doc(db, 'contentDeletes', delId)).catch(() => {});
-    }
+    deletedIdsRef.current[colName]?.delete(safeId);
+    await deleteDoc(doc(db, 'contentDeletes', delId)).catch(() => {});
   };
 
   const syncItemToFirestore = useCallback(

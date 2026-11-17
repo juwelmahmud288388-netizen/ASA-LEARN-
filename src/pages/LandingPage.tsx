@@ -135,14 +135,15 @@ export const LandingPage: React.FC = () => {
   };
 
   const featuredLessons = useMemo(() => {
-    const picked = lessons.filter((l) => l.featured);
-    const pool = [...(picked.length > 0 ? picked : lessons)];
+    const pool = [...lessons];
     pool.sort((a, b) => {
       const timeDiff = toTime(b.updatedAt || b.createdAt) - toTime(a.updatedAt || a.createdAt);
       if (timeDiff !== 0) return timeDiff;
-      return a.order - b.order;
+      const featuredDiff = (b.featured ? 1 : 0) - (a.featured ? 1 : 0);
+      if (featuredDiff !== 0) return featuredDiff;
+      return Number(a.order || 0) - Number(b.order || 0);
     });
-    return pool.slice(0, 6);
+    return pool;
   }, [lessons]);
 
   const popupSubjects = useMemo(() => {

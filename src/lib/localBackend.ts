@@ -917,6 +917,10 @@ function mergeCollection<T extends object>(
 export function localGetMergedCurriculum(isAdminView = false) {
   const seed = buildInitialSeedData();
   const ov = loadContentOverrides();
+  const isVisible = (status: unknown) => {
+    const normalized = String(status ?? 'published').trim().toLowerCase();
+    return normalized !== 'draft' && normalized !== 'archived' && normalized !== 'hidden';
+  };
 
   const categories = mergeCollection<CategoryItem>(
     seed.categories as unknown as CategoryItem[],
@@ -924,7 +928,7 @@ export function localGetMergedCurriculum(isAdminView = false) {
     ov.upserts.categories,
     ov.deletes.categories
   )
-    .filter((c) => isAdminView || c.status === 'published')
+    .filter((c) => isAdminView || isVisible(c.status))
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
 
   const classes = mergeCollection<ClassItem>(
@@ -933,7 +937,7 @@ export function localGetMergedCurriculum(isAdminView = false) {
     ov.upserts.classes,
     ov.deletes.classes
   )
-    .filter((c) => isAdminView || c.status === 'published')
+    .filter((c) => isAdminView || isVisible(c.status))
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
 
   const subjects = mergeCollection<SubjectItem>(
@@ -942,7 +946,7 @@ export function localGetMergedCurriculum(isAdminView = false) {
     ov.upserts.subjects,
     ov.deletes.subjects
   )
-    .filter((s) => isAdminView || s.status === 'published')
+    .filter((s) => isAdminView || isVisible(s.status))
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
 
   const chapters = mergeCollection<ChapterItem>(
@@ -951,7 +955,7 @@ export function localGetMergedCurriculum(isAdminView = false) {
     ov.upserts.chapters,
     ov.deletes.chapters
   )
-    .filter((ch) => isAdminView || ch.status === 'published')
+    .filter((ch) => isAdminView || isVisible(ch.status))
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
 
   const topics = mergeCollection<TopicItem>(
@@ -960,7 +964,7 @@ export function localGetMergedCurriculum(isAdminView = false) {
     ov.upserts.topics,
     ov.deletes.topics
   )
-    .filter((tp) => isAdminView || tp.status === 'published')
+    .filter((tp) => isAdminView || isVisible(tp.status))
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
 
   const lessons = mergeCollection<LessonItem>(
@@ -969,7 +973,7 @@ export function localGetMergedCurriculum(isAdminView = false) {
     ov.upserts.lessons,
     ov.deletes.lessons
   )
-    .filter((l) => isAdminView || l.status === 'published')
+    .filter((l) => isAdminView || isVisible(l.status))
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
 
   const resources = mergeCollection<ResourceItem>(
@@ -984,14 +988,14 @@ export function localGetMergedCurriculum(isAdminView = false) {
     'quizId',
     ov.upserts.quizzes,
     ov.deletes.quizzes
-  ).filter((q) => isAdminView || q.status === 'published');
+  ).filter((q) => isAdminView || isVisible(q.status));
 
   const announcements = mergeCollection<Announcement>(
     seed.announcements as unknown as Announcement[],
     'announcementId',
     ov.upserts.announcements,
     ov.deletes.announcements
-  ).filter((a) => isAdminView || a.published);
+  ).filter((a) => isAdminView || a.published !== false);
 
   return {
     settings: ov.settings || DEFAULT_APP_SETTINGS,
