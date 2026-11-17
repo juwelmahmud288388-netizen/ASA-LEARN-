@@ -12,23 +12,34 @@ interface VercelRes {
 }
 
 export default async function handler(req: VercelReq, res: VercelRes) {
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
+  if (req.method === 'OPTIONS') {
+    res.status(200).json({ success: true });
+    return;
+  }
   if (req.method !== 'POST') {
-    res.status(405).json({ error: 'Method not allowed' });
+    res.status(405).json({ success: false, error: 'Method not allowed' });
     return;
   }
 
   try {
-    const apiKey = process.env.GEMINI_API_KEY || '';
+    const apiKey = (process.env.GEMINI_API_KEY || '').trim();
     if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
-      res.status(503).json({ error: 'GEMINI_API_KEY is not configured.' });
+      res.status(503).json({ success: false, error: 'GEMINI_API_KEY is not configured.' });
       return;
     }
 
-    const body =
-      typeof req.body === 'string'
-        ? (JSON.parse(req.body || '{}') as Record<string, unknown>)
-        : ((req.body || {}) as Record<string, unknown>);
+    let body: Record<string, unknown> = {};
+    try {
+      body =
+        typeof req.body === 'string'
+          ? (JSON.parse(req.body || '{}') as Record<string, unknown>)
+          : ((req.body || {}) as Record<string, unknown>);
+    } catch {
+      res.status(400).json({ success: false, error: 'Invalid JSON request body.' });
+      return;
+    }
 
     const text = String(body.text || '');
     const language = String(body.language || 'bn');
@@ -45,7 +56,7 @@ export default async function handler(req: VercelReq, res: VercelRes) {
       .slice(0, 750);
 
     if (!cleanedText) {
-      res.status(400).json({ error: 'Text is required for speech generation.' });
+      res.status(400).json({ success: false, error: 'Text is required for speech generation.' });
       return;
     }
 
@@ -91,13 +102,13 @@ export default async function handler(req: VercelReq, res: VercelRes) {
 
     const audioBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     if (!audioBase64) {
-      res.status(502).json({ error: 'AI Voice synthesis did not return audio data.' });
+      res.status(502).json({ success: false, error: 'AI Voice synthesis did not return audio data.' });
       return;
     }
 
-    res.status(200).json({ audioBase64, mimeType: 'audio/wav', voiceName });
+    res.status(200).json({ success: true, audioBase64, mimeType: 'audio/wav', voiceName });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'AI TTS request failed.';
-    res.status(500).json({ error: message });
+    res.status(500).json({ success: false, error: message });
   }
 }

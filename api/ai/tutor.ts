@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
-import { buildNctbTutorSystemInstruction } from '../../src/lib/nctbKnowledgeBase';
 
 interface VercelReq {
   method?: string;
@@ -30,6 +29,100 @@ interface FirestoreValue {
   integerValue?: string;
   doubleValue?: number;
   mapValue?: { fields?: Record<string, FirestoreValue> };
+}
+
+const NCTB_GENERAL_FOUNDATION = `
+[NCTB CURRICULUM CORE — BANGLADESH CLASSES 6 TO 10 / SSC]
+You are the authoritative academic AI Tutor for Bangladesh's NCTB (National Curriculum and Textbook Board) syllabus covering Classes 6, 7, 8, 9, and 10 (SSC Board standard).
+When a student drops ANY keyword, Bangla/English term, chapter name, formula, grammar rule, or problem—even without naming the class or chapter—immediately map it to the exact NCTB textbook concept and deliver a crisp, accurate, textbook-aligned explanation. Never give vague answers or ask the student to explain basic context.
+`.trim();
+
+const NCTB_JUNIOR_HIGH_6_TO_8 = `
+[CLASSES 6–8 (JUNIOR SECONDARY) NCTB SUBJECT MASTERY]
+1. Mathematics (গণিত ৬ষ্ঠ–৮ম):
+   - Arithmetic: মৌলিক-যৌগিক সংখ্যা, গ.সা.গু (HCF) ও ল.সা.গু (LCM), ভগ্নাংশ ও দশমিক, অনুপাত ও সমানুপাত, শতকরা (Percentage), লাভ-ক্ষতি, ঐকিক নিয়ম (Unitary method), সরল ও চক্রবৃদ্ধি মুনাফা (I = Pnr; C = P(1+r)^n). পরিমাপ ও ক্ষেত্রফল (বৃত্তের পরিধি = 2πr ও ক্ষেত্রফল = πr²).
+   - Algebra: (a±b)² = a²±2ab+b², a²-b² = (a+b)(a-b), (a+b)³ = a³+3a²b+3ab²+b³, a³±b³ = (a±b)(a²∓ab+b²). উৎপাদকে বিশ্লেষণ, সরল ও সহসমীকরণ, সেট (∪, ∩, A').
+   - Geometry: কোণ (পূরক 90°, সম্পূরক 180°), ত্রিভুজের তিন কোণের সমষ্টি 180°, সর্বসমতা (SSS, SAS, ASA, RHS), পিথাগোরাসের উপপাদ্য (অতিভুজ² = লম্ব² + ভূমি²), বৃত্ত ও জ্যা উপপাদ্য।
+2. Science (বিজ্ঞান ৬ষ্ঠ–৮ম):
+   - জীববিজ্ঞান: কোষ ও অঙ্গাণু (মাইটোকন্ড্রিয়া, প্লাস্টিড, নিউক্লিয়াস), সালোকসংশ্লেষণ (6CO₂ + 6H₂O → C₆H₁₂O₆ + 6O₂), অভিস্রবণ ও ব্যাপন, পরিপাক-শ্বসন-রক্ত সংবহন-স্নায়ুতন্ত্র।
+   - পদার্থ ও রসায়ন: পরমাণু ও অণু, প্রতীক-সংকেত-যোজনী, এসিড-ক্ষার-লবণ ও pH, তাপ ও তাপমাত্রা (C/5 = (F-32)/9), আলোর প্রতিফলন-প্রতিসরণ, ওহমের সূত্র V = IR, মহাকর্ষ (W = mg, g = 9.8 m/s²).
+`.trim();
+
+const NCTB_SSC_MATH_STEM = `
+[CLASSES 9–10 (SSC) SCIENCE & MATHEMATICS NCTB MASTERY]
+1. General & Higher Mathematics:
+   - সেট ও ফাংশন: ডোমেন, রেঞ্জ, n(A∪B) = n(A)+n(B)-n(A∩B); দ্বিঘাত সমীকরণ x = (-b ± √(b²-4ac))/(2a), নিশ্চায়ক D = b²-4ac; সূচক ও লগারিদম (a^x = N ⇔ log_a(N) = x); ত্রিকোণমিতি (sin²θ + cos²θ = 1, s = rθ); সমান্তর ও গুণোত্তর ধারা; স্থানাঙ্ক জ্যামিতি, পরিমিতি ও পরিসংখ্যান।
+2. Physics (পদার্থবিজ্ঞান ৯ম–১০ম):
+   - পরিমাপ (VC = s/n, LC = পিচ/ভাগসংখ্যা), গতি (v = u+at, s = ut+½at², v² = u²+2as), বল (p = mv, F = ma), কাজ-শক্তি (W = Fs cosθ, E_k = ½mv², E_p = mgh), চাপ-আর্কিমিডিস (P = F/A = hρg, F_b = Vρg), তাপ-তরঙ্গ (Q = msΔθ, v = fλ, d = vt/2), আলো (1/u + 1/v = 1/f, n₁ sin i = n₂ sin r), বিদ্যুৎ (F = k q₁q₂/r², V = IR, P = VI = I²R = V²/R, ট্রান্সফরমার V_p/V_s = N_p/N_s).
+3. Chemistry (রসায়ন ৯ম–১০ম):
+   - বোর মডেল, ইলেকট্রন বিন্যাস (ব্যতিক্রম: Cr(24): [Ar]3d⁵4s¹, Cu(29): [Ar]3d¹⁰4s¹), পর্যায় সারণি, আয়নিক-সমযোজী বন্ধন, জারণ-বিজারণ, লা শাতেলিয়ার নীতি, মোল গণনা (n = W/M = N/N_A = V(L)/22.4, S = 1000W/(MV)), pH ও জৈব রসায়ন (অ্যালকেন-অ্যালকিন-অ্যালকাইন-অ্যালকোহল-জৈব এসিড)।
+4. Biology (জীববিজ্ঞান ৯ম–১০ম):
+   - শ্রেণিবিন্যাস, মাইটোসিস ও মিয়োসিস, সবাত শ্বসন (38 ATP) বনাম অবাত শ্বসন (2 ATP), এনজাইম ও পরিপাক, হৃৎপিণ্ড ও রক্ত (ABO/Rh), নেফ্রন, স্নায়ুতন্ত্র, উদ্ভিদের দ্বি-নিষেক, DNA দ্বি-সূত্রক ও মেন্ডেলের সূত্র।
+`.trim();
+
+const NCTB_LANGUAGES_ICT_HUMANITIES = `
+[NCTB BANGLA, ENGLISH, ICT, BGS & COMMERCE (CLASSES 6–10)]
+1. বাংলা ১ম ও ২য় পত্র: ধ্বনি-বর্ণ, ণ-ত্ব ও ষ-ত্ব বিধান, সন্ধি, প্রকৃতি-প্রত্যয়, সমাস (দ্বন্দ্ব, কর্মধারয়, তৎপুরুষ, বহুব্রীহি, দ্বিগু, অব্যয়ীভাব), উপসর্গ, কারক ও বিভক্তি, বাচ্য, উক্তি, বাক্য ও বাগধারা।
+2. English 1st & 2nd Paper: 12 Tenses, Right Form of Verbs, Voice, Narration, Transformation (Simple/Complex/Compound, Degree), Articles, Prepositions, Suffix/Prefix, Tag Questions, Conditionals, Completing Sentences.
+3. ICT: ই-সেবা, হার্ডওয়্যার-সফটওয়্যার, সাইবার নিরাপত্তা, স্প্রেডশিট (=SUM, =AVERAGE, =IF), DBMS (Primary/Foreign Key), HTML ট্যাগ।
+4. BGS ও ব্যবসায় শিক্ষা: ১৯৫২–১৯৭১ মুক্তিযুদ্ধ, সংবিধান; হিসাব সমীকরণ A = L + OE, জাবেদা-খতিয়ান-রেওয়ামিল; অর্থের সময়মূল্য FV = PV(1+i)^n, বিধি-৭২।
+`.trim();
+
+function buildNctbSystemInstruction(ctx: {
+  classContext?: string;
+  subjectContext?: string;
+  lessonContext?: string;
+  mode?: string;
+  language?: string;
+  availableNotesContext?: string;
+  adminGuidance?: string;
+}): string {
+  const clsLower = `${ctx.classContext || ''} ${ctx.lessonContext || ''}`.toLowerCase();
+  const subjLower = `${ctx.subjectContext || ''} ${ctx.lessonContext || ''}`.toLowerCase();
+  const isJunior = /class[\s-]*[678]|৬ষ্ঠ|৭ম|৮ম|six|seven|eight/.test(clsLower);
+  const isSenior = /class[\s-]*(9|10)|৯ম|১০ম|ssc|nine|ten/.test(clsLower);
+  const isLang =
+    /bangla|english|ict|social|bgs|global|accounting|finance|বাংলা|ইংরেজি|আইসিটি|সমাজ|বিশ্বপরিচয়|হিসাববিজ্ঞান|ফিন্যান্স/.test(
+      subjLower
+    );
+  const isStem =
+    /math|science|physics|chemistry|biology|higher|গণিত|বিজ্ঞান|পদার্থ|রসায়ন|জীববিজ্ঞান|উচ্চতর/.test(subjLower);
+
+  const blocks = [NCTB_GENERAL_FOUNDATION];
+  if (isJunior && !isSenior) {
+    if (!subjLower || isStem || !isLang) blocks.push(NCTB_JUNIOR_HIGH_6_TO_8);
+  } else if (isSenior && !isJunior) {
+    if (!subjLower || isStem || !isLang) blocks.push(NCTB_SSC_MATH_STEM);
+  } else {
+    blocks.push(NCTB_JUNIOR_HIGH_6_TO_8, NCTB_SSC_MATH_STEM);
+  }
+  if (!subjLower || isLang || !isStem) blocks.push(NCTB_LANGUAGES_ICT_HUMANITIES);
+
+  const rules = [
+    'You are the "ASA LEARN AI Tutor" (আশা লার্নিং এআই টিউটর), an expert Bangladesh NCTB teacher inside the ASA LEARN chat drawer.',
+    'Zero Fluff & Instant Precision: Start answering directly with the core concept, definition, formula, or solution.',
+    'Step-by-Step Academic Rigor: For Math/Physics/Chemistry problems use: দেওয়া আছে (Given) → সূত্র (Formula) → সমাধান (Step-by-step) → উত্তর (Final answer with units). For CQs align with ক, খ, গ, ঘ.',
+    'Bilingual Clarity: Answer in natural, fluent, textbook-standard Bengali by default (with English scientific terms in parentheses). Switch to English if the student writes in English.',
+    'Only list or mention PDF/study-note resources if the student explicitly asks for PDFs, notes, sheets, or download links.',
+  ].join('\n');
+
+  return [
+    rules,
+    blocks.join('\n\n'),
+    ctx.adminGuidance && !ctx.adminGuidance.includes('Summary & Clear Breakdown')
+      ? `Additional Admin Guidance: ${ctx.adminGuidance}`
+      : '',
+    ctx.classContext ? `Active Student Class Context: ${ctx.classContext}.` : '',
+    ctx.subjectContext ? `Active Subject Focus: ${ctx.subjectContext}.` : '',
+    ctx.lessonContext ? `Current Video Lesson Context: ${ctx.lessonContext}.` : '',
+    `UI Language Setting: ${ctx.language === 'bn' ? 'Bengali (বাংলা)' : 'English (match the student question language)'}.`,
+    ctx.mode === 'chapter_summary'
+      ? 'Mode Instruction: Provide crisp, exam-focused bullet points highlighting key definitions, formulas, and board MCQ takeaways.'
+      : '',
+    ctx.availableNotesContext || '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 function readFirebaseConfig(): { projectId: string; firestoreDatabaseId: string } {
@@ -65,7 +158,7 @@ async function fetchPublicAiSettings(): Promise<{
 
   try {
     const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(cfg.projectId)}/databases/${encodeURIComponent(cfg.firestoreDatabaseId)}/documents/appSettings/global`;
-    const resp = await fetch(url, { signal: AbortSignal.timeout(1500) });
+    const resp = await fetch(url, { signal: AbortSignal.timeout(1200) });
     if (!resp.ok) return defaults;
     const docData = (await resp.json()) as { fields?: Record<string, FirestoreValue> };
     const aiFields = docData?.fields?.aiSettings?.mapValue?.fields;
@@ -92,7 +185,7 @@ async function fetchRequestedResources(
 
   try {
     const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(cfg.projectId)}/databases/${encodeURIComponent(cfg.firestoreDatabaseId)}/documents/resources?pageSize=50`;
-    const resp = await fetch(url, { signal: AbortSignal.timeout(1800) });
+    const resp = await fetch(url, { signal: AbortSignal.timeout(1500) });
     if (!resp.ok) return [];
     const data = (await resp.json()) as {
       documents?: Array<{ fields?: Record<string, FirestoreValue> }>;
@@ -131,12 +224,34 @@ async function fetchRequestedResources(
   }
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`TIMEOUT: ${label}`)), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      }
+    );
+  });
+}
+
 function extractRetryError(err: unknown): { status: number; message: string } {
   const rawMsg = err instanceof Error ? err.message : String(err);
+  if (rawMsg.includes('TIMEOUT') || rawMsg.toLowerCase().includes('timed out')) {
+    return {
+      status: 504,
+      message: 'AI service temporarily unavailable (request timed out). Please try again.',
+    };
+  }
   if (rawMsg.includes('403') || rawMsg.includes('PERMISSION_DENIED') || rawMsg.includes('API_KEY_INVALID')) {
     return {
       status: 403,
-      message: 'Gemini API key is invalid or missing. Please verify GEMINI_API_KEY in Vercel Environment Variables.',
+      message: 'Gemini API key is invalid or missing. Please verify GEMINI_API_KEY in Settings > Secrets.',
     };
   }
   if (rawMsg.includes('429') || rawMsg.includes('RESOURCE_EXHAUSTED')) {
@@ -148,36 +263,56 @@ function extractRetryError(err: unknown): { status: number; message: string } {
   if (rawMsg.includes('503') || rawMsg.includes('UNAVAILABLE')) {
     return {
       status: 503,
-      message: 'The AI Tutor model is experiencing temporary high demand. Please retry shortly.',
+      message: 'AI service temporarily unavailable. Please retry shortly.',
     };
   }
-  return { status: 500, message: rawMsg || 'AI Tutor request failed.' };
+  return {
+    status: 500,
+    message: rawMsg || 'AI service temporarily unavailable',
+  };
 }
 
 export default async function handler(req: VercelReq, res: VercelRes) {
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
+
+  if (req.method === 'OPTIONS') {
+    res.status(200).json({ success: true });
+    return;
+  }
+
   if (req.method !== 'POST') {
-    res.status(405).json({ error: 'Method not allowed' });
+    res.status(405).json({ success: false, error: 'Method not allowed' });
     return;
   }
 
   try {
-    const apiKey = process.env.GEMINI_API_KEY || '';
+    const apiKey = (process.env.GEMINI_API_KEY || '').trim();
     if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
       res.status(503).json({
-        error: 'GEMINI_API_KEY is not configured in server Environment Variables.',
+        success: false,
+        error: 'AI service temporarily unavailable: GEMINI_API_KEY is not configured.',
       });
       return;
     }
 
-    const body =
-      typeof req.body === 'string'
-        ? (JSON.parse(req.body || '{}') as Record<string, unknown>)
-        : ((req.body || {}) as Record<string, unknown>);
+    let body: Record<string, unknown> = {};
+    try {
+      body =
+        typeof req.body === 'string'
+          ? (JSON.parse(req.body || '{}') as Record<string, unknown>)
+          : ((req.body || {}) as Record<string, unknown>);
+    } catch {
+      res.status(400).json({ success: false, error: 'Invalid JSON request body.' });
+      return;
+    }
 
     const cleanMessage = String(body.message || '').trim();
     if (!cleanMessage) {
-      res.status(400).json({ error: 'অনুগ্রহ করে এআই টিউটরের জন্য একটি প্রশ্ন লিখুন।' });
+      res.status(400).json({
+        success: false,
+        error: 'অনুগ্রহ করে এআই টিউটরের জন্য একটি প্রশ্ন লিখুন।',
+      });
       return;
     }
 
@@ -190,7 +325,10 @@ export default async function handler(req: VercelReq, res: VercelRes) {
 
     const aiSettings = await fetchPublicAiSettings();
     if (!aiSettings.enabled) {
-      res.status(403).json({ error: 'AI Tutor is currently disabled by the administrator.' });
+      res.status(403).json({
+        success: false,
+        error: 'AI Tutor is currently disabled by the administrator.',
+      });
       return;
     }
 
@@ -210,7 +348,7 @@ export default async function handler(req: VercelReq, res: VercelRes) {
             .join('\n')}`
         : '';
 
-    const systemInstruction = buildNctbTutorSystemInstruction({
+    const systemInstruction = buildNctbSystemInstruction({
       classContext,
       subjectContext,
       lessonContext,
@@ -250,24 +388,32 @@ export default async function handler(req: VercelReq, res: VercelRes) {
     for (let i = 0; i < attempts.length; i += 1) {
       const m = attempts[i]!;
       try {
-        const result = await ai.models.generateContent({
-          model: m,
-          contents: multiTurnContents,
-          config: {
-            systemInstruction,
-            ...(m === 'gemini-4-hydrogen'
-              ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
-              : {}),
-          },
-        });
+        const result = await withTimeout(
+          ai.models.generateContent({
+            model: m,
+            contents: multiTurnContents,
+            config: {
+              systemInstruction,
+              ...(m === 'gemini-4-hydrogen'
+                ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+                : {}),
+            },
+          }),
+          20_000,
+          'Gemini Tutor timed out'
+        );
         responseText = result.text || '';
         break;
       } catch (err) {
         lastError = err;
         const msg = err instanceof Error ? err.message : String(err);
-        const isTransient = msg.includes('503') || msg.includes('UNAVAILABLE') || msg.includes('429');
+        const isTransient =
+          msg.includes('503') ||
+          msg.includes('UNAVAILABLE') ||
+          msg.includes('429') ||
+          msg.includes('TIMEOUT');
         if (!isTransient || i === attempts.length - 1) throw err;
-        await new Promise((r) => setTimeout(r, 500));
+        await new Promise((r) => setTimeout(r, 450));
       }
     }
 
@@ -275,13 +421,21 @@ export default async function handler(req: VercelReq, res: VercelRes) {
       throw lastError;
     }
 
+    const finalReply =
+      responseText || 'দুঃখিত, এই মুহূর্তে উত্তর তৈরি করা যায়নি। অনুগ্রহ করে প্রশ্নটি আবার লিখুন।';
+
     res.status(200).json({
-      reply: responseText || 'দুঃখিত, এই মুহূর্তে উত্তর তৈরি করা যায়নি। অনুগ্রহ করে প্রশ্নটি আবার লিখুন।',
+      success: true,
+      text: finalReply,
+      reply: finalReply,
       matchedResources: wantsResources ? scoredResources : [],
       model: primaryModel,
     });
   } catch (err) {
     const parsed = extractRetryError(err);
-    res.status(parsed.status).json({ error: parsed.message });
+    res.status(parsed.status).json({
+      success: false,
+      error: parsed.message || 'AI service temporarily unavailable',
+    });
   }
 }

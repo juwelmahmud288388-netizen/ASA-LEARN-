@@ -457,7 +457,9 @@ export const AiTutorWidget: React.FC = () => {
       if (idToken) headers.Authorization = `Bearer ${idToken}`;
 
       const res = await safeJsonFetch<{
+        success?: boolean;
         reply?: string;
+        text?: string;
         quotaRemaining?: number;
         matchedResources?: MatchedStudyResource[];
         error?: string;
@@ -478,9 +480,10 @@ export const AiTutorWidget: React.FC = () => {
 
       let replyText: string;
       let matchedResources: MatchedStudyResource[] | undefined;
+      const serverReply = res.data?.reply || res.data?.text;
 
-      if (res.ok && res.data?.reply) {
-        replyText = res.data.reply;
+      if (res.ok && res.data && res.data.success !== false && serverReply) {
+        replyText = serverReply;
         if (typeof res.data.quotaRemaining === 'number') setQuotaRemaining(res.data.quotaRemaining);
         matchedResources =
           Array.isArray(res.data.matchedResources) && res.data.matchedResources.length > 0

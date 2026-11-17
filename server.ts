@@ -55,25 +55,25 @@ if (existingApps.length > 0) {
 const adminDb = getAdminFirestore(adminApp, firebaseConfig.firestoreDatabaseId);
 const adminAuth = getAuth(adminApp);
 
-// Initialize Gemini AI client strictly server-side
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY || '',
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    },
-  },
-});
+// Helper to read and validate Gemini API key dynamically server-side
+function getGeminiApiKey(): string {
+  const key = (process.env.GEMINI_API_KEY || '').trim();
+  if (!key || key === 'MY_GEMINI_API_KEY') return '';
+  return key;
+}
 
-const aiTts = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY || '',
-  apiVersion: 'v1beta',
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
+function getAiClient(apiVersion?: string): GoogleGenAI {
+  const apiKey = getGeminiApiKey();
+  return new GoogleGenAI({
+    apiKey,
+    ...(apiVersion ? { apiVersion } : {}),
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
     },
-  },
-});
+  });
+}
 
 // In-memory rate limiter for auth routes & fallback AI quota tracking
 const authRateLimiter = new Map<string, { count: number; resetAt: number }>();
@@ -813,6 +813,12 @@ function extractRetryError(err: unknown): { status: number; message: string } {
     // Keep raw message if not JSON
   }
 
+  if (rawMsg.includes('TIMEOUT') || rawMsg.toLowerCase().includes('timed out')) {
+    return {
+      status: 504,
+      message: 'AI service temporarily unavailable (request timed out). Please try again.',
+    };
+  }
   if (rawMsg.includes('403') || rawMsg.includes('PERMISSION_DENIED') || rawMsg.includes('API_KEY_INVALID')) {
     return {
       status: 403,
@@ -828,30 +834,60 @@ function extractRetryError(err: unknown): { status: number; message: string } {
   if (rawMsg.includes('503') || rawMsg.includes('UNAVAILABLE')) {
     return {
       status: 503,
-      message: 'The AI Tutor model is experiencing temporary high demand. Please retry in a few seconds.',
+      message: 'AI service temporarily unavailable. Please retry in a few seconds.',
     };
   }
-  return { status: 500, message: parsedMessage || 'AI Tutor request failed.' };
+  return {
+    status: 500,
+    message: parsedMessage || 'AI service temporarily unavailable.',
+  };
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`TIMEOUT: ${label}`));
+    }, ms);
+    promise.then(
+      (val) => {
+        clearTimeout(timer);
+        resolve(val);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
 }
 
 async function generateWithRetry(
   primaryModel: string,
-  params: Omit<Parameters<typeof ai.models.generateContent>[0], 'model'>
+  params: Omit<Parameters<GoogleGenAI['models']['generateContent']>[0], 'model'>
 ) {
-  const attempts = [primaryModel, primaryModel, 'gemini-3.1-flash-lite'];
+  const aiClient = getAiClient();
+  const attempts = [primaryModel, 'gemini-3.1-flash-lite'];
   let lastError: unknown;
   for (let i = 0; i < attempts.length; i += 1) {
     try {
-      return await ai.models.generateContent({
-        model: attempts[i]!,
-        ...params,
-      });
+      return await withTimeout(
+        aiClient.models.generateContent({
+          model: attempts[i]!,
+          ...params,
+        }),
+        22_000,
+        'Gemini response timed out'
+      );
     } catch (err) {
       lastError = err;
       const msg = err instanceof Error ? err.message : String(err);
-      const isTransient = msg.includes('503') || msg.includes('UNAVAILABLE') || msg.includes('429');
+      const isTransient =
+        msg.includes('503') ||
+        msg.includes('UNAVAILABLE') ||
+        msg.includes('429') ||
+        msg.includes('TIMEOUT');
       if (!isTransient || i === attempts.length - 1) throw err;
-      await new Promise((r) => setTimeout(r, 700 * (i + 1)));
+      await new Promise((r) => setTimeout(r, 600 * (i + 1)));
     }
   }
   throw lastError;
@@ -860,7 +896,21 @@ async function generateWithRetry(
 async function startServer() {
   await ensureAdminPasswordInitialized();
   const app = express();
+
+  // Enforce JSON headers for every /api/* route up front
+  app.use('/api', (_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    next();
+  });
+
   app.use(express.json({ limit: '15mb' }));
+  app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
+    if (err && (req.originalUrl.startsWith('/api') || req.path.startsWith('/api'))) {
+      res.status(400).json({ success: false, error: 'Invalid JSON request payload.' });
+      return;
+    }
+    next(err);
+  });
 
   // Health & Status Check
   app.get('/api/health', async (_req: Request, res: Response) => {
@@ -1767,15 +1817,23 @@ async function startServer() {
 
   // Streamlined AI Personal Tutor Endpoint (answers academic doubts + suggests relevant study notes / PDF links)
   app.post('/api/ai/tutor', async (req: AuthenticatedRequest, res: Response) => {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
     try {
-      if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'MY_GEMINI_API_KEY') {
-        res.status(503).json({ error: 'GEMINI_API_KEY is not configured in server secrets.' });
+      if (!getGeminiApiKey()) {
+        res.status(503).json({
+          success: false,
+          error: 'AI service temporarily unavailable: GEMINI_API_KEY is not configured in server secrets.',
+        });
         return;
       }
 
       const aiSettings = await getAiSettingsFromFirestore();
       if (!aiSettings.enabled) {
-        res.status(403).json({ error: 'AI Tutor is currently disabled by the administrator.' });
+        res.status(403).json({
+          success: false,
+          error: 'AI Tutor is currently disabled by the administrator.',
+        });
         return;
       }
 
@@ -1784,7 +1842,10 @@ async function startServer() {
       const currentCount = memoryAiUsage.get(quotaKey) || 0;
       const limit = Number(aiSettings.dailyQuotaPerStudent || 40);
       if (currentCount >= limit) {
-        res.status(429).json({ error: `Daily AI Tutor quota (${limit} messages) reached. Try again tomorrow.` });
+        res.status(429).json({
+          success: false,
+          error: `Daily AI Tutor quota (${limit} messages) reached. Try again tomorrow.`,
+        });
         return;
       }
 
@@ -1800,7 +1861,10 @@ async function startServer() {
 
       const cleanMessage = String(message || '').trim();
       if (!cleanMessage) {
-        res.status(400).json({ error: 'অনুগ্রহ করে এআই টিউটরের জন্য একটি প্রশ্ন লিখুন।' });
+        res.status(400).json({
+          success: false,
+          error: 'অনুগ্রহ করে এআই টিউটরের জন্য একটি প্রশ্ন লিখুন।',
+        });
         return;
       }
 
@@ -1933,16 +1997,22 @@ async function startServer() {
       });
 
       memoryAiUsage.set(quotaKey, currentCount + 1);
+      const replyText = response.text || 'I could not generate a response. Please rephrase your question.';
 
-      res.json({
-        reply: response.text || 'I could not generate a response. Please rephrase your question.',
+      res.status(200).json({
+        success: true,
+        text: replyText,
+        reply: replyText,
         matchedResources: wantsResources ? scoredResources : [],
         model: modelName,
         quotaRemaining: Math.max(0, limit - (currentCount + 1)),
       });
     } catch (err) {
       const parsed = extractRetryError(err);
-      res.status(parsed.status).json({ error: parsed.message });
+      res.status(parsed.status).json({
+        success: false,
+        error: parsed.message || 'AI service temporarily unavailable',
+      });
     }
   });
 
@@ -2037,9 +2107,10 @@ async function startServer() {
 
   // Natural AI Voice Synthesis (Gemini 3.8 Flash Lite TTS -> 24kHz WAV)
   app.post('/api/ai/tts', async (req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
     try {
-      if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'MY_GEMINI_API_KEY') {
-        res.status(503).json({ error: 'GEMINI_API_KEY is not configured.' });
+      if (!getGeminiApiKey()) {
+        res.status(503).json({ success: false, error: 'GEMINI_API_KEY is not configured.' });
         return;
       }
 
@@ -2051,7 +2122,7 @@ async function startServer() {
         .slice(0, 750);
 
       if (!cleanedText) {
-        res.status(400).json({ error: 'Text is required for speech generation.' });
+        res.status(400).json({ success: false, error: 'Text is required for speech generation.' });
         return;
       }
 
@@ -2067,41 +2138,46 @@ async function startServer() {
           ? `Read the following Bangla educational explanation clearly, warmly, and naturally for a school student:\n${cleanedText}`
           : `Read the following educational explanation clearly, warmly, and naturally for a school student:\n${cleanedText}`;
 
-      const response = await aiTts.models.generateContent({
-        model: 'gemini-3.8-flash-lite-tts',
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                text: promptPrefix,
-                speechMetadata: {
-                  style: 'Warm, clear, encouraging school teacher voice',
+      const aiTtsClient = getAiClient('v1beta');
+      const response = await withTimeout(
+        aiTtsClient.models.generateContent({
+          model: 'gemini-3.8-flash-lite-tts',
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  text: promptPrefix,
+                  speechMetadata: {
+                    style: 'Warm, clear, encouraging school teacher voice',
+                  },
                 },
+              ],
+            },
+          ],
+          config: {
+            responseModalities: ['AUDIO'],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName: selectedVoice },
               },
-            ],
-          },
-        ],
-        config: {
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: selectedVoice },
             },
           },
-        },
-      });
+        }),
+        20_000,
+        'AI Voice synthesis timed out'
+      );
 
       const audioBase64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
       if (!audioBase64) {
-        res.status(502).json({ error: 'AI Voice synthesis did not return audio data.' });
+        res.status(502).json({ success: false, error: 'AI Voice synthesis did not return audio data.' });
         return;
       }
 
-      res.json({ audioBase64, mimeType: 'audio/wav', voiceName: selectedVoice });
+      res.json({ success: true, audioBase64, mimeType: 'audio/wav', voiceName: selectedVoice });
     } catch (err) {
       const parsed = extractRetryError(err);
-      res.status(parsed.status).json({ error: parsed.message });
+      res.status(parsed.status).json({ success: false, error: parsed.message });
     }
   });
 
@@ -3537,13 +3613,15 @@ Include bilingual English & natural Unicode Bangla titles/descriptions for 1 cha
 
   // Guarantee every /api/* route always returns valid JSON (never HTML)
   app.use('/api', (_req: Request, res: Response) => {
-    res.status(404).json({ error: 'API endpoint not found.' });
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.status(404).json({ success: false, error: 'API endpoint not found.' });
   });
 
   app.use((err: unknown, req: Request, res: Response, next: express.NextFunction) => {
-    if (req.path.startsWith('/api')) {
+    if (req.originalUrl.startsWith('/api') || req.path.startsWith('/api')) {
       const msg = err instanceof Error ? err.message : 'Internal server error.';
-      res.status(500).json({ error: msg });
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.status(500).json({ success: false, error: msg });
       return;
     }
     next(err);
